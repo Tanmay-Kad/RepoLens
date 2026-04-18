@@ -16,6 +16,7 @@
     "express": "^4.19.2",
     "madge": "^8.0.0",
     "mongoose": "^8.3.2",
+    "openai": "^6.34.0",
     "simple-git": "^3.36.0"
   },
   "devDependencies": {

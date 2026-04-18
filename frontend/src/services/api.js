@@ -8,9 +8,13 @@ export const analyzeRepository = async (url) => {
     return response.data;
   } catch (error) {
     if (error.response) {
-      throw new Error(error.response.data.error || 'Failed to analyze repository');
+      const apiErr = new Error(error.response.data.error || 'Failed to analyze repository');
+      apiErr.details = error.response.data.details;
+      apiErr.command = error.response.data.command;
+      throw apiErr;
     }
-    throw new Error('Network error. Ensure the server is running.');
+    const diagnostic = error.code ? ` (${error.code})` : '';
+    throw new Error(`Network error${diagnostic}. Ensure the server is running on port 5000.`);
   }
 };
 
@@ -22,7 +26,8 @@ export const getGraphData = async (repoId) => {
     if (error.response) {
       throw new Error(error.response.data.error || 'Failed to fetch graph data');
     }
-    throw new Error('Network error. Ensure the server is running.');
+    const diagnostic = error.code ? ` (${error.code})` : '';
+    throw new Error(`Network error${diagnostic}. Ensure the server is running on port 5000.`);
   }
 };
 
@@ -39,6 +44,7 @@ export const getAiSummary = async ({ repoId, fileName, dependencies, dependents 
     if (error.response) {
       throw new Error(error.response.data.error || 'AI summary unavailable.');
     }
-    throw new Error('AI summary unavailable.');
+    const diagnostic = error.code ? ` (${error.code})` : '';
+    throw new Error(`AI summary unavailable${diagnostic}.`);
   }
 };

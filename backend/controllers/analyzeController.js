@@ -14,9 +14,11 @@ export const analyzeRepository = async (req, res) => {
   }
 
   try {
+    console.log(`[Analyze] Starting analysis for URL: ${url}`);
     const git = simpleGit();
     
     // Validate repository
+    console.log(`[Analyze] Validating remote repository...`);
     try {
       const remoteInfo = await git.listRemote([url]);
       if (!remoteInfo || remoteInfo.trim() === '') {
@@ -45,37 +47,55 @@ export const analyzeRepository = async (req, res) => {
 
     repo.status = 'analyzing';
     await repo.save();
+    console.log(`[Analyze] Database record created/updated. Status: analyzing`);
 
     const analysisResult = await performAnalysis(url);
+    console.log(`[Analyze] Static analysis (mock) complete.`);
     
     repo.status = 'completed';
     repo.metrics = analysisResult;
     await repo.save();
+    console.log(`[Analyze] Metrics saved to database.`);
 
     // Clone Repository
+    console.log(`[Analyze] Preparing to clone repository...`);
     repo.cloneStatus = 'cloning';
     await repo.save();
 
-    const repoName = url.split('/').pop().replace('.git', '');
-    const cloneDir = path.join(process.cwd(), 'cloned-repos', `${repo.id}-${repoName}`);
+    // Ensure the parent directory exists
+    const projectRoot = path.join(process.cwd(), '..');
+    const parentDir = path.join(projectRoot, 'cloned-repos');
+    if (!fs.existsSync(parentDir)) {
+      console.log(`[Analyze] Creating parent directory: ${parentDir}`);
+      fs.mkdirSync(parentDir, { recursive: true });
+    }
+
+    const cloneDir = path.join(parentDir, `${repo.id}-${repoName}`);
+    console.log(`[Analyze] Target clone directory: ${cloneDir}`);
 
     // If the directory already exists (e.g. from a previous cancelled run), remove it
-    // otherwise git clone will fail because the destination path already exists and is not an empty directory.
     if (fs.existsSync(cloneDir)) {
+      console.log(`[Analyze] Cleaning up existing directory...`);
       fs.rmSync(cloneDir, { recursive: true, force: true });
     }
 
     try {
+      console.log(`[Analyze] Starting git clone (shallow)...`);
       // Use shallow clone to make copying large repositories much faster
       await git.clone(url, cloneDir, ['--depth', '1', '--single-branch']);
+      console.log(`[Analyze] Clone successful.`);
       repo.localPath = cloneDir;
       repo.cloneStatus = 'completed';
       await repo.save();
     } catch (cloneErr) {
-      console.error('Clone error:', cloneErr);
+      console.error('Clone error detailed:', cloneErr);
       repo.cloneStatus = 'failed';
       await repo.save();
-      return res.status(500).json({ error: 'Failed to clone repository' });
+      return res.status(500).json({ 
+        error: 'Failed to clone repository', 
+        details: cloneErr.message,
+        command: cloneErr.command
+      });
     }
 
     res.status(200).json({ 
@@ -122,15 +142,17 @@ export const getGraphData = async (req, res) => {
 
     // Fix path resolution specifically for Windows environments
     const absoluteLocalPath = path.resolve(repo.localPath);
-    console.log('Starting Madge analysis on resolved path:', absoluteLocalPath);
+    console.log(`[Graph] Starting Madge analysis on resolved path: ${absoluteLocalPath}`);
 
     // Generate graph using Madge
     let resMadge;
     try {
+      console.log(`[Graph] Invoking Madge...`);
       resMadge = await madge(absoluteLocalPath, {
         includeNpm: false,
         fileExtensions: ['js', 'jsx', 'ts', 'tsx']
       });
+      console.log(`[Graph] Madge analysis complete.`);
     } catch (madgeErr) {
       console.error('Madge initialization specifically failed:', madgeErr);
       return res.status(500).json({ error: 'Madge analysis failed', details: madgeErr.message });

@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { Search, Loader2, ArrowRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import FeatureCards from './FeatureCards';
-import GraphView from './GraphView';
 import { analyzeRepository } from '../services/api';
 
 export default function LandingPage() {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [result, setResult] = useState(null);
+  const navigate = useNavigate();
 
   const handleAnalyze = async (e) => {
     e.preventDefault();
@@ -16,13 +16,13 @@ export default function LandingPage() {
 
     setLoading(true);
     setError(null);
-    setResult(null);
 
     try {
       const data = await analyzeRepository(url);
-      setResult(data);
+      navigate(`/dashboard/${data.repoId}`);
     } catch (err) {
-      setError(err.message);
+      // If the error has extra clinical 'details', show them
+      setError(err.message + (err.details ? `: ${err.details}` : ''));
     } finally {
       setLoading(false);
     }
@@ -91,20 +91,10 @@ export default function LandingPage() {
             </div>
           )}
 
-          {/* Results Area */}
-          {result && (
-            <div className="mt-12 w-full max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <h2 className="text-2xl font-bold mb-6 flex items-center gap-3 justify-center md:justify-start">
-                <div className="w-3 h-3 rounded-full bg-green-400 shadow-[0_0_10px_rgba(74,222,128,0.5)]" />
-                Analysis Complete: {result.data?.url?.split('/').slice(-2).join('/') || 'Repository'}
-              </h2>
-              <GraphView repoId={result.repoId} />
-            </div>
-          )}
         </div>
 
         {/* Feature Cards below Hero */}
-        {!result && <FeatureCards />}
+        <FeatureCards />
       </main>
     </div>
   );
