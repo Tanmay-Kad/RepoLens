@@ -1,0 +1,5 @@
+PORT=5000
+MONGODB_URI=mongodb+srv://dorathemailexplorer_db_user:Repo_Lens_admin19@repolenscluster.yutrrto.mongodb.net/?appName=RepoLensCluster
+GEMINI_API_KEY=AIzaSyA6tWmLZT1WqaHWZr6fKyUtxfORUaVWr2o
+GEMINI_MODEL=gemini-1.5-flash
+GITHUB_TOKEN=your_github_token_here
