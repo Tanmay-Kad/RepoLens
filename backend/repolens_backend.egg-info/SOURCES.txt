@@ -1,6 +1,0 @@
-pyproject.toml
-repolens_backend.egg-info/PKG-INFO
-repolens_backend.egg-info/SOURCES.txt
-repolens_backend.egg-info/dependency_links.txt
-repolens_backend.egg-info/requires.txt
-repolens_backend.egg-info/top_level.txt
