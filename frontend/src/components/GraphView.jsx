@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import CytoscapeComponent from 'react-cytoscapejs';
 import cytoscape from 'cytoscape';
-import { getGraphData, getAiSummary } from '../services/api';
-import { Loader2, Search, AlertTriangle, Sparkles, X } from 'lucide-react';
+import { getGraphData, getAiSummary, searchFilesAi } from '../services/api';
+import { Loader2, Search, AlertTriangle, Sparkles, X, Flame, Activity } from 'lucide-react';
 
 export default function GraphView({ repoId }) {
   const [elements, setElements] = useState([]);
@@ -12,6 +12,10 @@ export default function GraphView({ repoId }) {
   
   const [selectedNode, setSelectedNode] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [aiSearchMode, setAiSearchMode] = useState(false);
+  const [aiSearchLoading, setAiSearchLoading] = useState(false);
+  const [dangerousFiles, setDangerousFiles] = useState([]);
+  const [isSimulating, setIsSimulating] = useState(false);
   const [aiSummary, setAiSummary] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
@@ -63,6 +67,19 @@ export default function GraphView({ repoId }) {
         if (data.circular) {
           setCircularDeps(data.circular);
         }
+
+        // Calculate dangerous files (most incoming dependents)
+        const nodeDependentsCount = {};
+        if (data.edges) {
+          data.edges.forEach(e => {
+            nodeDependentsCount[e.target] = (nodeDependentsCount[e.target] || 0) + 1;
+          });
+        }
+        const topDangerous = Object.entries(nodeDependentsCount)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([id, count]) => ({ id, label: id.split('/').pop(), count }));
+        setDangerousFiles(topDangerous);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -74,14 +91,16 @@ export default function GraphView({ repoId }) {
   }, [repoId]);
 
   const handleSearch = (e) => {
-    const query = e.target.value.toLowerCase();
+    const query = e.target.value;
     setSearchQuery(query);
     
-    if (cyRef.current) {
+    if (!aiSearchMode && cyRef.current) {
+      const q = query.toLowerCase();
       const cy = cyRef.current;
       cy.batch(() => {
         cy.nodes().forEach(node => {
-          if (!query || node.data('fullPath').toLowerCase().includes(query)) {
+          node.style('border-width', 0); // reset AI search border
+          if (!q || node.data('fullPath').toLowerCase().includes(q)) {
             node.style('opacity', 1);
             node.style('overlay-opacity', 0);
           } else {
@@ -90,6 +109,69 @@ export default function GraphView({ repoId }) {
         });
       });
     }
+  };
+
+  const executeAiSearch = async () => {
+    if (!searchQuery.trim() || !aiSearchMode) return;
+    setAiSearchLoading(true);
+    try {
+      const nodesOnly = elements.filter(e => e.data && e.data.id).map(e => ({ id: e.data.id }));
+      const res = await searchFilesAi({ query: searchQuery, nodes: nodesOnly });
+      const matchingIds = res.results || [];
+      
+      if (cyRef.current) {
+        cyRef.current.batch(() => {
+          cyRef.current.nodes().forEach(node => {
+            if (matchingIds.includes(node.data('id'))) {
+              node.style('opacity', 1);
+              node.style('overlay-opacity', 0);
+              node.style('border-color', '#a855f7');
+              node.style('border-width', 4);
+            } else {
+              node.style('opacity', 0.2);
+              node.style('border-width', 0);
+            }
+          });
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAiSearchLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (aiSearchMode && searchQuery.trim()) {
+      const timer = setTimeout(() => {
+        executeAiSearch();
+      }, 1000); // debounce AI search
+      return () => clearTimeout(timer);
+    } else if (!aiSearchMode && cyRef.current) {
+      // Re-trigger standard search
+      handleSearch({ target: { value: searchQuery } });
+    }
+  }, [searchQuery, aiSearchMode]);
+
+  const simulateBlastRadius = () => {
+    if (!cyRef.current || !selectedNode) return;
+    const cy = cyRef.current;
+    const node = cy.getElementById(selectedNode.id);
+
+    if (isSimulating) {
+      cy.elements().removeClass('blast-radius blast-center blast-edge');
+      setIsSimulating(false);
+      return;
+    }
+
+    setIsSimulating(true);
+    cy.elements().removeClass('blast-radius blast-center blast-edge');
+    node.addClass('blast-center');
+    
+    // Find all nodes that depend on this node recursively (predecessors)
+    const predecessors = node.predecessors();
+    predecessors.nodes().addClass('blast-radius');
+    predecessors.edges().addClass('blast-edge');
   };
 
   const layout = {
@@ -134,6 +216,32 @@ export default function GraphView({ repoId }) {
         'overlay-opacity': 0.2,
         'overlay-color': '#38bdf8'
       }
+    },
+    {
+      selector: '.blast-radius',
+      style: {
+        'background-color': '#ef4444',
+        'border-width': 2,
+        'border-color': '#fca5a5'
+      }
+    },
+    {
+      selector: '.blast-center',
+      style: {
+        'background-color': '#b91c1c',
+        'border-width': 4,
+        'border-color': '#fca5a5'
+      }
+    },
+    {
+      selector: '.blast-edge',
+      style: {
+        'line-color': '#ef4444',
+        'target-arrow-color': '#ef4444',
+        'width': 4,
+        'opacity': 1,
+        'z-index': 10
+      }
     }
   ];
 
@@ -166,20 +274,61 @@ export default function GraphView({ repoId }) {
   const impactBarColor = impactScore >= 70 ? 'bg-red-500' : impactScore >= 35 ? 'bg-yellow-500' : 'bg-emerald-500';
 
   return (
-    <div className="flex flex-col md:flex-row w-full h-[600px] border border-white/10 rounded-2xl overflow-hidden bg-[#0f172a]/80 backdrop-blur-xl relative mt-8">
+    <div className="flex w-full h-[600px] border border-white/10 rounded-2xl overflow-hidden bg-[#0f172a]/80 backdrop-blur-xl mt-8">
       
-      {/* Search Bar Overlay */}
-      <div className="absolute top-4 left-4 z-10 w-64">
-        <div className="relative">
+      {/* Left Sidebar - Always Visible */}
+      <div className="w-[300px] shrink-0 border-r border-white/10 bg-[#1e293b]/60 flex flex-col p-4 overflow-y-auto z-10">
+        
+        {/* Search Bar */}
+        <div className="relative flex items-center mb-6">
           <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
           <input
             type="text"
-            placeholder="Search files..."
+            placeholder={aiSearchMode ? "Ask AI..." : "Search files..."}
             value={searchQuery}
             onChange={handleSearch}
-            className="w-full pl-9 pr-4 py-2 bg-[#1e293b]/90 border border-white/10 rounded-lg text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+            className={`w-full pl-9 pr-10 py-2 bg-[#0f172a]/90 border ${aiSearchMode ? 'border-violet-500/50 focus:border-violet-400' : 'border-white/10 focus:border-blue-500'} rounded-lg text-sm text-white placeholder-gray-400 focus:outline-none transition-colors`}
           />
+          <button 
+            onClick={() => setAiSearchMode(!aiSearchMode)}
+            className={`absolute right-2 p-1.5 rounded-md transition-colors ${aiSearchMode ? 'bg-violet-500/20 text-violet-400' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+            title="Toggle AI Semantic Search"
+          >
+            {aiSearchLoading ? <Loader2 className="w-4 h-4 animate-spin text-violet-400" /> : <Sparkles className="w-4 h-4" />}
+          </button>
         </div>
+        
+        {/* Dangerous Files List */}
+        {dangerousFiles.length > 0 && (
+          <div className="bg-[#0f172a]/60 border border-red-500/20 rounded-xl p-4 flex-1">
+            <div className="flex items-center gap-2 mb-4 text-red-400 font-semibold text-xs uppercase tracking-widest">
+              <Flame className="w-4 h-4" /> Highly Depended
+            </div>
+            <div className="flex flex-col gap-2">
+              {dangerousFiles.map(df => (
+                <div 
+                  key={df.id} 
+                  className="flex items-center justify-between text-xs cursor-pointer hover:bg-white/5 p-2 rounded-lg transition-colors border border-transparent hover:border-white/5"
+                  onClick={() => {
+                    if (cyRef.current) {
+                      const node = cyRef.current.getElementById(df.id);
+                      if (node) {
+                        node.emit('tap');
+                        cyRef.current.zoom({ level: 1.5, position: node.position() });
+                      }
+                    }
+                  }}
+                >
+                  <span className="text-gray-300 truncate w-40" title={df.id}>{df.label}</span>
+                  <span className="text-red-400 bg-red-400/10 px-2 py-0.5 rounded-md font-mono">{df.count}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-500 mt-4 leading-relaxed">
+              These files have the highest number of incoming dependents. Modifying them carries the highest risk of breaking downstream systems.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Cytoscape Canvas */}
@@ -200,13 +349,18 @@ export default function GraphView({ repoId }) {
               const node = evt.target;
               const data = node.data();
               
-              const dependencies = cy.edges(`[source = "${data.id}"]`).length;
-              const dependents = cy.edges(`[target = "${data.id}"]`).length;
+              const dependencyEdges = cy.edges(`[source = "${data.id}"]`);
+              const dependencyFiles = [];
+              dependencyEdges.forEach(e => dependencyFiles.push(e.target().id()));
+              
+              const dependentEdges = cy.edges(`[target = "${data.id}"]`);
+              const dependentFiles = [];
+              dependentEdges.forEach(e => dependentFiles.push(e.source().id()));
               
               setSelectedNode({
                 ...data,
-                dependencies,
-                dependents
+                dependencies: dependencyFiles.length,
+                dependents: dependentFiles.length
               });
 
               // Fetch AI summary for this node
@@ -216,8 +370,8 @@ export default function GraphView({ repoId }) {
               getAiSummary({
                 repoId,
                 fileName: data.id,
-                dependencies,
-                dependents,
+                dependencies: dependencyFiles,
+                dependents: dependentFiles,
               }).then(res => {
                 setAiSummary(res.summary);
               }).catch(err => {
@@ -245,9 +399,9 @@ export default function GraphView({ repoId }) {
         </div>
       </div>
 
-      {/* Side Panel Details */}
+      {/* Right Side Panel Details */}
       {selectedNode && (
-        <div className="w-[320px] shrink-0 border-t md:border-t-0 md:border-l border-white/10 bg-[#1e293b]/60 flex flex-col overflow-y-auto animate-in slide-in-from-right-4 duration-300 z-20">
+        <div className="w-[320px] shrink-0 border-l border-white/10 bg-[#1e293b]/60 flex flex-col overflow-y-auto animate-in slide-in-from-right-4 duration-300 z-20">
 
           {/* Header */}
           <div className="p-5 border-b border-white/10 flex items-start justify-between gap-3">
@@ -291,6 +445,17 @@ export default function GraphView({ repoId }) {
               </div>
               <p className="text-[10px] text-gray-500 mt-2">Weighted by dependents × 7 + dependencies × 3. High impact = risky to change.</p>
             </div>
+
+            {/* Blast Radius Button */}
+            <button
+              onClick={simulateBlastRadius}
+              className={`flex items-center justify-center gap-2 p-3 rounded-xl border transition-all duration-300 ${isSimulating ? 'bg-red-500/20 border-red-500/40 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'bg-[#0f172a]/60 border-red-500/20 text-red-400 hover:bg-red-500/10'}`}
+            >
+              <Activity className="w-4 h-4" />
+              <span className="text-sm font-bold uppercase tracking-wide">
+                {isSimulating ? 'Clear Simulation' : 'Simulate Blast Radius'}
+              </span>
+            </button>
 
             {/* Circular dependency warning */}
             {isCircular && (

@@ -42,3 +42,15 @@ export const getAiSummary = async ({ repoId, fileName, dependencies, dependents 
     throw new Error('AI summary unavailable.');
   }
 };
+
+export const searchFilesAi = async ({ query, nodes }) => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/ai/search`, { query, nodes });
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(error.response.data.error || 'AI search failed.');
+    }
+    throw new Error('AI search failed.');
+  }
+};

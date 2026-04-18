@@ -1,5 +1,5 @@
 import Repository from '../models/Repository.js';
-import { generateFileSummary } from '../services/geminiService.js';
+import { generateFileSummary, searchFilesWithAI } from '../services/geminiService.js';
 import mongoose from 'mongoose';
 
 export const getAiSummary = async (req, res) => {
@@ -45,5 +45,21 @@ export const getAiSummary = async (req, res) => {
   } catch (error) {
     console.error('Gemini AI summary error:', error);
     res.status(500).json({ error: 'AI summary unavailable.', details: error.message });
+  }
+};
+
+export const searchFiles = async (req, res) => {
+  const { query, nodes } = req.body;
+
+  if (!query || !nodes || !Array.isArray(nodes)) {
+    return res.status(400).json({ error: 'Query and nodes array are required.' });
+  }
+
+  try {
+    const results = await searchFilesWithAI({ query, nodes });
+    res.status(200).json({ results });
+  } catch (error) {
+    console.error('Gemini AI search error:', error);
+    res.status(500).json({ error: 'AI search unavailable.', details: error.message });
   }
 };
