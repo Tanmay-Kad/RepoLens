@@ -74,22 +74,50 @@ async def analyze_repository(request: RepoRequest):
         return {"status": "success", "data": result}
 
     except Exception as e:
+        print(f"Analyze error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/query")
 async def natural_language_query(request: QueryRequest):
     try:
+        print(f"Query request - repo_id: {request.repo_id}, query: {request.query}")
         db = get_db()
+
         repo = await db.repositories.find_one(
             {"repo_name": request.repo_id}
         )
-        if not repo:
-            raise HTTPException(status_code=404, detail="Repo not found")
 
-        result = await answer_nl_query(request.query, repo["nodes"])
+        if not repo:
+            print(f"Repo not found: {request.repo_id}")
+            print("Trying partial match...")
+            all_repos = await db.repositories.find({}).to_list(50)
+            print(f"All repos in DB: {[r.get('repo_name') for r in all_repos]}")
+
+            for r in all_repos:
+                if request.repo_id.lower() in r.get('repo_name', '').lower():
+                    repo = r
+                    break
+
+        if not repo:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Repository '{request.repo_id}' not found. Please analyze it first."
+            )
+
+        nodes = repo.get("nodes", [])
+        print(f"Found repo with {len(nodes)} nodes")
+
+        result = await answer_nl_query(request.query, nodes)
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Query route error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/repos")

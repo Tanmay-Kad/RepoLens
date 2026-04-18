@@ -1,5 +1,4 @@
 from google import genai
-from google.genai import types
 from app.config import GEMINI_API_KEY
 from app.services.parser_service import read_file_content
 
@@ -22,11 +21,12 @@ File content:
 Summary:"""
 
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash",
             contents=prompt
         )
         return response.text.strip()
     except Exception as e:
+        print(f"Summary error for {filename}: {e}")
         return f"This is a {node_type} file named {filename}."
 
 async def generate_onboarding_explanation(onboarding_path: list) -> str:
@@ -45,59 +45,89 @@ Files in order:
 Explanation:"""
 
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash",
             contents=prompt
         )
         return response.text.strip()
     except Exception as e:
+        print(f"Onboarding explanation error: {e}")
         return "Read the files in this order to build understanding from the ground up."
 
 async def answer_nl_query(query: str, nodes: list) -> dict:
     try:
+        print(f"Processing NL query: {query}")
+        print(f"Total nodes available: {len(nodes)}")
+
+        if not nodes:
+            return {
+                "answer": "No files found in this repository to search through.",
+                "relevant_files": []
+            }
+
         files_context = "\n".join([
-            f"- {n['id']} ({n['node_type']}): {n.get('summary', 'No summary')}"
-            for n in nodes[:50]
+            f"- {n['id']} ({n.get('node_type', 'unknown')}): {n.get('summary', 'No summary available')}"
+            for n in nodes[:60]
         ])
 
-        prompt = f"""You are a codebase expert. A developer asks: "{query}"
+        prompt = f"""You are an expert software engineer helping a developer understand a codebase.
 
-Here are the files in the codebase with their summaries:
+A developer is asking: "{query}"
+
+Here are the files in the codebase with their types and descriptions:
 {files_context}
 
-Answer the question and list the most relevant file paths that answer it.
-Format your response as:
-ANSWER: [your explanation in 2-3 sentences]
-FILES: [comma separated list of relevant file paths]"""
+Please provide:
+1. A clear, helpful answer to the developer's question based on the files available
+2. List the most relevant files that relate to their question
 
+Respond in this exact format:
+ANSWER: [Write 2-4 sentences explaining where/how this is handled in the codebase. Be specific about file names.]
+FILES: [List the relevant file paths separated by commas. Only include files from the list above.]
+
+If you cannot find relevant files, still provide a helpful answer based on what you can see."""
+
+        print("Calling Gemini API for NL query...")
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash",
             contents=prompt
         )
+
         text = response.text.strip()
+        print(f"Gemini response: {text[:200]}...")
 
         answer = ""
         relevant_files = []
 
-        if "ANSWER:" in text:
+        if "ANSWER:" in text and "FILES:" in text:
             answer_part = text.split("ANSWER:")[1]
-            if "FILES:" in answer_part:
-                answer = answer_part.split("FILES:")[0].strip()
-                files_part = answer_part.split("FILES:")[1].strip()
-                relevant_files = [
-                    f.strip() for f in files_part.split(",")
-                    if f.strip()
-                ]
-            else:
-                answer = answer_part.strip()
+            answer = answer_part.split("FILES:")[0].strip()
+            files_part = text.split("FILES:")[1].strip()
+            relevant_files = [
+                f.strip()
+                for f in files_part.split(",")
+                if f.strip() and len(f.strip()) > 2
+            ]
+        elif "ANSWER:" in text:
+            answer = text.split("ANSWER:")[1].strip()
         else:
             answer = text
+
+        if not answer:
+            answer = "I found some potentially relevant files based on your query. Please check the highlighted files."
+
+        print(f"Answer: {answer[:100]}")
+        print(f"Relevant files: {relevant_files}")
 
         return {
             "answer": answer,
             "relevant_files": relevant_files
         }
+
     except Exception as e:
+        print(f"NL Query error: {e}")
+        import traceback
+        traceback.print_exc()
         return {
-            "answer": "Could not process query.",
+            "answer": f"Error processing query: {str(e)}",
             "relevant_files": []
         }

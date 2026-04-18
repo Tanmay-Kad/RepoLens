@@ -19,9 +19,11 @@ export const queryRepo = async (
   repoId: string,
   query: string,
 ): Promise<QueryResult> => {
+  console.log("Sending query:", { repoId, query });
   const response = await api.post("/api/repo/query", {
     repo_id: repoId,
-    query,
+    query: query,
   });
+  console.log("Query response:", response.data);
   return response.data;
 };
