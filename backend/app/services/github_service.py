@@ -1,14 +1,19 @@
 import os
+import stat
 import shutil
 import git
 from app.config import GITHUB_TOKEN, TEMP_REPO_PATH
+
+def handle_remove_readonly(func, path, exc_info):
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
 
 def clone_repository(repo_url: str, repo_name: str) -> str:
     os.makedirs(TEMP_REPO_PATH, exist_ok=True)
     repo_path = os.path.join(TEMP_REPO_PATH, repo_name)
 
     if os.path.exists(repo_path):
-        shutil.rmtree(repo_path)
+        shutil.rmtree(repo_path, onexc=handle_remove_readonly)
 
     print(f"Cloning {repo_url}...")
 
@@ -41,6 +46,9 @@ def get_commit_history(repo_path: str) -> list:
         return []
 
 def cleanup_repository(repo_path: str):
-    if os.path.exists(repo_path):
-        shutil.rmtree(repo_path)
-        print(f"Cleaned up {repo_path}")
+    try:
+        if os.path.exists(repo_path):
+            shutil.rmtree(repo_path, onexc=handle_remove_readonly)
+            print(f"Cleaned up {repo_path}")
+    except Exception as e:
+        print(f"Cleanup warning: {e}")
