@@ -1,26 +1,59 @@
-import React from 'react';
-import logo from './logo.svg';
-import './App.css';
+import React from "react";
+import { useAppStore } from "./store";
+import Header from "./components/Header";
+import LandingPage from "./components/LandingPage";
+import GraphView from "./components/GraphView";
+import NodePanel from "./components/NodePanel";
+import Sidebar from "./components/Sidebar";
 
-function App() {
+const App: React.FC = () => {
+  const { repoData } = useAppStore();
+
+  if (!repoData) {
+    return (
+      <>
+        <Header />
+        <LandingPage />
+      </>
+    );
+  }
+
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
+    <div
+      style={{
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        background: "#0f172a",
+        overflow: "hidden",
+      }}
+    >
+      <Header />
+      <div
+        style={{
+          display: "flex",
+          flex: 1,
+          marginTop: "60px",
+          overflow: "hidden",
+        }}
+      >
+        <Sidebar />
+        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+          <GraphView />
+        </div>
+        <div
+          style={{
+            width: "280px",
+            background: "#0a0f1e",
+            borderLeft: "1px solid #1e293b",
+            overflowY: "auto",
+          }}
         >
-          Learn React
-        </a>
-      </header>
+          <NodePanel />
+        </div>
+      </div>
     </div>
   );
-}
+};
 
 export default App;

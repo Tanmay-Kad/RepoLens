@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from "react";
-import CytoscapeComponent from "react-cytoscape";
+import React from "react";
+import CytoscapeComponent from "react-cytoscapejs";
 import { useAppStore } from "../store";
 
 const NODE_COLORS: Record<string, string> = {
@@ -46,7 +46,7 @@ const GraphView: React.FC = () => {
       })),
   ];
 
-  const stylesheet: any[] = [
+  const stylesheet: cytoscape.Stylesheet[] = [
     {
       selector: "node",
       style: {
@@ -55,8 +55,8 @@ const GraphView: React.FC = () => {
         label: "data(label)",
         color: "#f1f5f9",
         "font-size": "10px",
-        "text-valign": "bottom",
-        "text-margin-y": "4px",
+        "text-valign": "bottom" as any,
+        "text-margin-y": "4px" as any,
         width: (ele: any) =>
           Math.max(20, Math.min(60, 20 + ele.data("impact_score") * 2)),
         height: (ele: any) =>
@@ -64,7 +64,6 @@ const GraphView: React.FC = () => {
         "border-width": 2,
         "border-color": (ele: any) =>
           NODE_COLORS[ele.data("node_type")] || "#64748b",
-        "border-opacity": 0.8,
       },
     },
     {
@@ -98,7 +97,14 @@ const GraphView: React.FC = () => {
   ];
 
   return (
-    <div style={{ width: "100%", height: "100%", background: "#0f172a" }}>
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        background: "#0f172a",
+        position: "relative",
+      }}
+    >
       <CytoscapeComponent
         elements={elements}
         stylesheet={stylesheet}
