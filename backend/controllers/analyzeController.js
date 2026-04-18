@@ -70,6 +70,7 @@ export const analyzeRepository = async (req, res) => {
       fs.mkdirSync(parentDir, { recursive: true });
     }
 
+    const repoName = url.split('/').pop().replace('.git', '');
     const cloneDir = path.join(parentDir, `${repo.id}-${repoName}`);
     console.log(`[Analyze] Target clone directory: ${cloneDir}`);
 
