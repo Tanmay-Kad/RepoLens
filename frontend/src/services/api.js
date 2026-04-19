@@ -87,6 +87,19 @@ export const getOnboardingPath = async (repoId, mode) => {
   }
 };
 
+export const getConfigData = async (repoId) => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/config/${repoId}`);
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(error.response.data.error || 'Failed to fetch config data');
+    }
+    const diagnostic = error.code ? ` (${error.code})` : '';
+    throw new Error(`Network error${diagnostic}. Ensure the server is running on port 5000.`);
+  }
+};
+
 export const getAiSummary = async ({ repoId, fileName, dependencies, dependents }) => {
   try {
     const response = await axios.post(`${API_BASE_URL}/ai/summary`, {

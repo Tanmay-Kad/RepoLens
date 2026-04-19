@@ -23,7 +23,12 @@ export default function NodeDetailPanel({
       <div className="p-5 border-b border-white/10 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-base font-bold text-white break-words leading-tight">{selectedNode.label}</h3>
-          <p className="text-[11px] text-gray-500 mt-1 break-all">{selectedNode.fullPath}</p>
+          <p className="text-[11px] text-gray-500 mt-1 break-all">{selectedNode.fullPath || selectedNode.filePath}</p>
+          {selectedNode.nodeType === 'config' && (
+            <span className="inline-flex items-center gap-1 mt-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300">
+              ⬡ Configuration File · {selectedNode.configType}
+            </span>
+          )}
         </div>
         <button
           onClick={onClose}
@@ -62,16 +67,18 @@ export default function NodeDetailPanel({
           <p className="text-[10px] text-gray-500 mt-2">Weighted by dependents × 7 + dependencies × 3. High impact = risky to change.</p>
         </div>
 
-        <button 
-          onClick={() => {
-            console.log('[DEBUG] NodeDetailPanel Simulate Button Clicked!');
-            onSimulate();
-          }}
-          className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-red-500/20 to-orange-500/20 hover:from-red-500/30 hover:to-orange-500/30 border border-red-500/30 text-red-400 font-bold text-sm py-3 rounded-xl transition-all shadow-[0_0_15px_rgba(239,68,68,0.1)] hover:shadow-[0_0_20px_rgba(239,68,68,0.2)]"
-        >
-          <AlertTriangle className="w-4 h-4" />
-          Simulate Blast Radius
-        </button>
+        {selectedNode.nodeType !== 'config' && (
+          <button 
+            onClick={() => {
+              console.log('[DEBUG] NodeDetailPanel Simulate Button Clicked!');
+              onSimulate();
+            }}
+            className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-red-500/20 to-orange-500/20 hover:from-red-500/30 hover:to-orange-500/30 border border-red-500/30 text-red-400 font-bold text-sm py-3 rounded-xl transition-all shadow-[0_0_15px_rgba(239,68,68,0.1)] hover:shadow-[0_0_20px_rgba(239,68,68,0.2)]"
+          >
+            <AlertTriangle className="w-4 h-4" />
+            Simulate Blast Radius
+          </button>
+        )}
 
         {/* Circular dependency warning */}
         {isCircular && (

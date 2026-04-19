@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ChevronUp, ChevronDown, FileCode } from 'lucide-react';
+import { ChevronUp, ChevronDown, FileCode, Settings2 } from 'lucide-react';
 
 export default function FileManifest({ graphData, onSelect, currentSelection, searchQuery }) {
   const [sortConfig, setSortConfig] = useState({ key: 'id', direction: 'asc' });
@@ -9,19 +9,26 @@ export default function FileManifest({ graphData, onSelect, currentSelection, se
     
     return graphData.nodes.map(node => {
       const dependencies = graphData.edges.filter(e => e.source === node.id).length;
-      const dependents = graphData.edges.filter(e => e.target === node.id).length;
-      const impactScore = Math.min(100, (dependents * 7) + (dependencies * 3));
+      const dependents   = graphData.edges.filter(e => e.target === node.id).length;
+      const impactScore  = Math.min(100, (dependents * 7) + (dependencies * 3));
+      const isConfig     = Boolean(node.isConfig);
+      // Config nodes use .label; source nodes use last path segment
+      const displayName  = isConfig ? (node.label || node.id) : node.id.split('/').pop();
+      const displayPath  = isConfig ? (node.filePath || node.label || node.id) : node.id;
       
       return {
         id: node.id,
-        name: node.id.split('/').pop(),
-        path: node.id,
+        name: displayName,
+        path: displayPath,
+        isConfig,
+        configType: node.type || null,
         dependencies,
         dependents,
-        impactScore
+        impactScore,
       };
-    }).filter(file => 
-      file.path.toLowerCase().includes(searchQuery.toLowerCase())
+    }).filter(file =>
+      file.path.toLowerCase().includes((searchQuery || '').toLowerCase()) ||
+      file.name.toLowerCase().includes((searchQuery || '').toLowerCase())
     );
   }, [graphData, searchQuery]);
 
@@ -62,7 +69,8 @@ export default function FileManifest({ graphData, onSelect, currentSelection, se
           <p className="text-xs text-slate-500 italic">Centralized registry of all detected source components and their coupling metrics.</p>
         </div>
         <div className="text-[10px] bg-white/5 border border-white/10 px-3 py-1.5 rounded-full text-slate-400">
-          Showing <span className="text-blue-400 font-bold">{sortedFiles.length}</span> individual modules
+          Showing <span className="text-blue-400 font-bold">{sortedFiles.length}</span> modules
+          <span className="ml-2 text-amber-400 font-bold">{sortedFiles.filter(f => f.isConfig).length} config</span>
         </div>
       </div>
 
@@ -102,12 +110,28 @@ export default function FileManifest({ graphData, onSelect, currentSelection, se
                 <tr 
                   key={file.id} 
                   onClick={() => onSelect(file)}
-                  className={`group cursor-pointer transition-all duration-200 ${currentSelection?.id === file.id ? 'bg-blue-500/10 border-l-4 border-l-blue-500' : 'hover:bg-white/5 border-l-4 border-l-transparent'}`}
+                  className={`group cursor-pointer transition-all duration-200 ${
+                    currentSelection?.id === file.id
+                      ? 'bg-blue-500/10 border-l-4 border-l-blue-500'
+                      : file.isConfig
+                        ? 'border-l-4 border-l-amber-500/40 hover:bg-amber-500/5'
+                        : 'hover:bg-white/5 border-l-4 border-l-transparent'
+                  }`}
                 >
                   <td className="px-6 py-4 truncate max-w-sm">
                     <div className="flex items-center gap-3">
-                      <FileCode className={`w-4 h-4 ${currentSelection?.id === file.id ? 'text-blue-400' : 'text-slate-500 group-hover:text-blue-400'}`} />
-                      <span className={`text-xs font-medium ${currentSelection?.id === file.id ? 'text-blue-200' : 'text-slate-300 group-hover:text-white'}`}>{file.path}</span>
+                      {file.isConfig
+                        ? <Settings2 className={`w-4 h-4 shrink-0 ${currentSelection?.id === file.id ? 'text-amber-400' : 'text-amber-500/60 group-hover:text-amber-400'}`} />
+                        : <FileCode className={`w-4 h-4 shrink-0 ${currentSelection?.id === file.id ? 'text-blue-400' : 'text-slate-500 group-hover:text-blue-400'}`} />
+                      }
+                      <div className="min-w-0">
+                        <span className={`text-xs font-medium block truncate ${
+                          currentSelection?.id === file.id ? 'text-blue-200' : 'text-slate-300 group-hover:text-white'
+                        }`}>{file.path}</span>
+                        {file.isConfig && (
+                          <span className="text-[9px] text-amber-400/70 font-mono">{file.configType} · config</span>
+                        )}
+                      </div>
                     </div>
                   </td>
                   <td className="px-4 py-4 text-center">

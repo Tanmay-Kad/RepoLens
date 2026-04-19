@@ -50,14 +50,20 @@ export default function DependencyExplorerModal({ isOpen, onClose, initialNodeId
 
     const nodes = graphData.nodes
       .filter(n => neighborIds.has(n.id))
-      .map(n => ({
-        data: { 
-          id: n.id, 
-          label: n.id.split('/').pop(),
-          isCurrent: n.id === currentNodeId,
-          color: n.id === currentNodeId ? '#3b82f6' : '#94a3b8'
-        }
-      }));
+      .map(n => {
+        const isConfig = Boolean(n.isConfig);
+        const parent = n.filePath && n.filePath.includes('/') ? n.filePath.split('/').slice(0, -1).join('/') : '';
+        const label = isConfig && parent ? `${parent}/${n.label}` : (n.label || n.id.split('/').pop());
+        
+        return {
+          data: { 
+            id: n.id, 
+            label,
+            isCurrent: n.id === currentNodeId,
+            color: n.id === currentNodeId ? '#3b82f6' : (isConfig ? '#f59e0b' : '#94a3b8')
+          }
+        };
+      });
 
     const edges = graphData.edges
       .filter(e => neighborIds.has(e.source) && neighborIds.has(e.target))
@@ -165,7 +171,9 @@ export default function DependencyExplorerModal({ isOpen, onClose, initialNodeId
                     </React.Fragment>
                   ))}
                   <span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded-md font-bold truncate max-w-[200px] border border-blue-500/30">
-                    {currentNodeId.split('/').pop()}
+                    {currentNode.isConfig && currentNode.filePath && currentNode.filePath.includes('/') 
+                      ? `${currentNode.filePath.split('/').slice(0,-1).join('/')}/${currentNode.label}` 
+                      : (currentNode.label || currentNode.id.split('/').pop())}
                   </span>
                 </div>
               </nav>
@@ -232,7 +240,7 @@ export default function DependencyExplorerModal({ isOpen, onClose, initialNodeId
                   </div>
                   <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-2">
                     {relationships.dependencies.map(id => (
-                      <NodeCard key={id} id={id} type="dep" onClick={() => handleNavigate(id)} />
+                      <NodeCard key={id} id={id} type="dep" onClick={() => handleNavigate(id)} graphData={graphData} />
                     ))}
                     {relationships.dependencies.length === 0 && (
                       <EmptyState text="No outbound dependencies" />
@@ -247,7 +255,7 @@ export default function DependencyExplorerModal({ isOpen, onClose, initialNodeId
                   </div>
                   <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-2">
                     {relationships.dependents.map(id => (
-                      <NodeCard key={id} id={id} type="parent" onClick={() => handleNavigate(id)} />
+                      <NodeCard key={id} id={id} type="parent" onClick={() => handleNavigate(id)} graphData={graphData} />
                     ))}
                     {relationships.dependents.length === 0 && (
                       <EmptyState text="No incoming dependents" />
@@ -263,24 +271,31 @@ export default function DependencyExplorerModal({ isOpen, onClose, initialNodeId
   );
 }
 
-const NodeCard = ({ id, onClick, type }) => (
-  <motion.div 
-    whileHover={{ x: 4, backgroundColor: "rgba(255,255,255,0.05)" }}
-    onClick={onClick}
-    className="p-3 rounded-xl border border-white/5 bg-slate-900/50 cursor-pointer flex items-center justify-between group"
-  >
-    <div className="flex items-center gap-3 min-w-0">
-      <div className={`p-2 rounded-lg ${type === 'dep' ? 'bg-blue-500/10 text-blue-400' : 'bg-purple-500/10 text-purple-400'}`}>
-        <FileCode className="w-4 h-4" />
+const NodeCard = ({ id, onClick, type, graphData }) => {
+  const node = graphData?.nodes?.find(n => n.id === id);
+  const isConfig = node?.isConfig;
+  const parent = node?.filePath && node?.filePath.includes('/') ? node.filePath.split('/').slice(0, -1).join('/') : '';
+  const label = isConfig && parent ? `${parent}/${node.label}` : (node?.label || id.split('/').pop());
+
+  return (
+    <motion.div 
+      whileHover={{ x: 4, backgroundColor: "rgba(255,255,255,0.05)" }}
+      onClick={onClick}
+      className={`p-3 rounded-xl border border-white/5 bg-slate-900/50 cursor-pointer flex items-center justify-between group ${isConfig ? 'border-l-4 border-l-amber-500/40' : ''}`}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <div className={`p-2 rounded-lg ${isConfig ? 'bg-amber-500/10 text-amber-500' : (type === 'dep' ? 'bg-blue-500/10 text-blue-400' : 'bg-purple-500/10 text-purple-400')}`}>
+          {isConfig ? <Settings2 className="w-4 h-4" /> : <FileCode className="w-4 h-4" />}
+        </div>
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-slate-200 truncate">{label}</div>
+          <div className="text-[9px] text-slate-500 truncate">{id}</div>
+        </div>
       </div>
-      <div className="min-w-0">
-        <div className="text-xs font-medium text-slate-200 truncate">{id.split('/').pop()}</div>
-        <div className="text-[9px] text-slate-500 truncate">{id}</div>
-      </div>
-    </div>
-    <ChevronRight className="w-4 h-4 text-slate-700 group-hover:text-white transition-colors shrink-0" />
-  </motion.div>
-);
+      <ChevronRight className="w-4 h-4 text-slate-700 group-hover:text-white transition-colors shrink-0" />
+    </motion.div>
+  );
+};
 
 const EmptyState = ({ text }) => (
   <div className="flex flex-col items-center justify-center py-12 text-slate-600 grayscale opacity-40">

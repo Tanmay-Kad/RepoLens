@@ -40,9 +40,9 @@ export default function RepositoryDashboard() {
   const [simulationConfig, setSimulationConfig] = useState({ active: false, rootNodeId: null, severity: 'Medium' });
   const [simulationResults, setSimulationResults] = useState({ totalImpacted: 0, depth: 0, riskScore: 0, impactedFiles: [] });
 
-  const [searchResults, setSearchResults] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchFilter, setSearchFilter] = useState('All');
+  const [searchResults, setSearchResults]   = useState([]);
+  const [isSearching, setIsSearching]         = useState(false);
+  const [searchFilter, setSearchFilter]       = useState('All');
 
   // Memoize debounced standard search
   const performSearch = useMemo(() => debounce(async (query, filter, repoIdStr) => {

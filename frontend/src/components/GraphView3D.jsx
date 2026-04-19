@@ -3,7 +3,7 @@ import ForceGraph3D from 'react-force-graph-3d';
 import SpriteText from 'three-spritetext';
 import { Loader2, Focus } from 'lucide-react';
 
-export default function GraphView3D({ repoId, initialData, searchQuery = '', onNodeSelect, simulationConfig, onSimulationUpdate, externalSelectedNodeId }) {
+export default function GraphView3D({ repoId, initialData, searchQuery = '', onNodeSelect, simulationConfig, onSimulationUpdate, externalSelectedNodeId, showConfig = true }) {
   const fgRef = useRef();
   const containerRef = useRef();
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
@@ -21,21 +21,45 @@ export default function GraphView3D({ repoId, initialData, searchQuery = '', onN
   }, []);
   
   // Create memoized base graph data matching react-force-graph format
+  // Respects showConfig toggle — config nodes come from initialData.nodes (isConfig: true)
   const baseData = useMemo(() => {
     if (!initialData || !initialData.nodes) return { nodes: [], links: [] };
-    
-    return {
-      nodes: initialData.nodes.map(n => ({
-        id: n.id,
-        label: n.id.split('/').pop(),
-        fullPath: n.id,
-      })),
-      links: (initialData.edges || []).map(e => ({
-        source: e.source,
-        target: e.target
-      }))
+
+    const CONFIG_COLORS_3D = {
+      pkg: '#f59e0b', 'pkg-lock': '#d97706', tsconfig: '#8b5cf6', jsconfig: '#7c3aed',
+      vite: '#f97316', webpack: '#fb923c', babel: '#facc15', eslint: '#a78bfa',
+      prettier: '#c084fc', env: '#34d399', jest: '#f87171', vitest: '#fb7185',
+      tailwind: '#38bdf8', postcss: '#67e8f9', next: '#e2e8f0', nuxt: '#4ade80',
+      docker: '#60a5fa', ci: '#a3e635', make: '#94a3b8',
     };
-  }, [initialData]);
+
+    const filteredNodes = initialData.nodes.filter(n =>
+      showConfig ? true : !n.isConfig
+    );
+    const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
+
+    return {
+      nodes: filteredNodes.map(n => ({
+        id:         n.id,
+        label:      n.isConfig && n.filePath && n.filePath.includes('/') 
+          ? `${n.filePath.split('/').slice(0, -1).join('/')}/${n.label}` 
+          : (n.label || n.id.split('/').pop()),
+        fullPath:   n.filePath || n.id,
+        nodeType:   n.isConfig ? 'config' : 'source',
+        configType: n.type || null,
+        color3d:    n.isConfig
+          ? (CONFIG_COLORS_3D[n.type] || '#f59e0b')
+          : null,
+      })),
+      links: (initialData.edges || []).filter(e =>
+        filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target)
+      ).map(e => ({
+        source:   e.source,
+        target:   e.target,
+        edgeType: e.source.startsWith('__config__') ? 'config' : 'source',
+      })),
+    };
+  }, [initialData, showConfig]);
 
   // Handle Blast Radius Simulation & Selection logic
   const { displayData, simulationMetrics } = useMemo(() => {
@@ -134,27 +158,30 @@ export default function GraphView3D({ repoId, initialData, searchQuery = '', onN
     }
   }, [externalSelectedNodeId, displayData.nodes]);
 
-  const determineTypeAndColor = (id) => {
-    const lowerId = (id || '').toLowerCase();
+  const determineTypeAndColor = (node) => {
+    if (node.color3d) return node.color3d; // pre-computed config colour
+    const lowerId = (node.id || '').toLowerCase();
     if (lowerId.includes('test') || lowerId.includes('spec')) return '#4ade80';
     if (lowerId.includes('util') || lowerId.includes('helper')) return '#9ca3af';
     if (lowerId.includes('controller') || lowerId.includes('service') || lowerId.includes('model') || lowerId.includes('route')) return '#60a5fa';
-    if (lowerId === 'index.js' || lowerId === 'main.js' || lowerId === 'server.js' || lowerId === 'app.js') return '#fbbf24';
+    const base = lowerId.split('/').pop();
+    if (['index.js','main.js','server.js','app.js','index.ts','main.ts','app.ts'].includes(base)) return '#fbbf24';
     return '#94a3b8';
   };
 
   const handleNodeClick = (node) => {
     if (onNodeSelect) {
-      // Calculate dependents / dependencies natively
-      const deps = displayData.links.filter(l => l.source.id === node.id || l.source === node.id).length;
+      const deps      = displayData.links.filter(l => l.source.id === node.id || l.source === node.id).length;
       const dependents = displayData.links.filter(l => l.target.id === node.id || l.target === node.id).length;
       onNodeSelect({
-        id: node.id,
-        label: node.label,
-        fullPath: node.fullPath,
-        color: determineTypeAndColor(node.id),
+        id:         node.id,
+        label:      node.label,
+        fullPath:   node.fullPath,
+        nodeType:   node.nodeType,
+        configType: node.configType,
+        color:      determineTypeAndColor(node),
         dependencies: deps,
-        dependents: dependents
+        dependents:   dependents,
       });
     }
 
@@ -208,26 +235,33 @@ export default function GraphView3D({ repoId, initialData, searchQuery = '', onN
         }}
         
         nodeColor={node => {
-          if (node.blastLevel === 0) return '#ef4444'; // Red
-          if (node.blastLevel === 1) return '#f97316'; // Orange
-          if (node.blastLevel >= 2) return '#eab308'; // Yellow
-          if (node.isUnaffected) return 'rgba(100, 116, 139, 0.1)'; // Faded gray
-          
+          if (node.blastLevel === 0) return '#ef4444';
+          if (node.blastLevel === 1) return '#f97316';
+          if (node.blastLevel >= 2)  return '#eab308';
+          if (node.isUnaffected)     return 'rgba(100, 116, 139, 0.1)';
           if (searchQuery && !node.fullPath.toLowerCase().includes(searchQuery.toLowerCase())) {
             return 'rgba(100, 116, 139, 0.1)';
           }
-          
-          return determineTypeAndColor(node.id);
+          return determineTypeAndColor(node);
         }}
-        nodeVal={node => node.blastLevel !== undefined && node.blastLevel <= 2 ? 8 : 3}
+        nodeVal={node => {
+          if (node.blastLevel !== undefined && node.blastLevel <= 2) return 8;
+          if (node.nodeType === 'config') return 6; // slightly larger sphere
+          return 3;
+        }}
         nodeOpacity={1}
         nodeResolution={16}
         
-        linkColor={link => link.isBlastPath ? '#ef4444' : 'rgba(255,255,255,0.3)'}
-        linkWidth={link => link.isBlastPath ? 2 : 1}
+        linkColor={link => {
+          if (link.isBlastPath) return '#ef4444';
+          if (link.edgeType === 'config') return 'rgba(245,158,11,0.6)';
+          return 'rgba(255,255,255,0.3)';
+        }}
+        linkWidth={link => link.isBlastPath ? 2 : link.edgeType === 'config' ? 1.5 : 1}
         linkDirectionalArrowLength={3.5}
         linkDirectionalArrowRelPos={1}
-        linkDirectionalParticles={link => link.isBlastPath ? 4 : 0}
+        linkDirectionalParticles={link => link.isBlastPath ? 4 : link.edgeType === 'config' ? 2 : 0}
+        linkDirectionalParticleColor={link => link.edgeType === 'config' ? '#f59e0b' : '#ef4444'}
         linkDirectionalParticleSpeed={0.01}
         
         onNodeClick={handleNodeClick}
