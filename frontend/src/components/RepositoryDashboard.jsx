@@ -6,7 +6,20 @@ import NodeDetailPanel from './NodeDetailPanel';
 import FileManifest from './FileManifest';
 import DependencyTree from './DependencyTree';
 import SecurityAudit from './SecurityAudit';
-import { getAiSummary, getGraphData } from '../services/api';
+import BlastRadiusPanel from './BlastRadiusPanel';
+import SearchResultsPanel from './SearchResultsPanel';
+import OnboardingPathPanel from './OnboardingPathPanel';
+import AIChatWidget from './AIChatWidget';
+import { getAiSummary, getGraphData, searchCodebase, semanticSearchCodebase } from '../services/api';
+
+// Create a debounce utility outside the component
+const debounce = (func, delay) => {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => func(...args), delay);
+  };
+};
 
 export default function RepositoryDashboard() {
   const { repoId } = useParams();
@@ -23,6 +36,49 @@ export default function RepositoryDashboard() {
   const [aiSummary, setAiSummary] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
+
+  const [simulationConfig, setSimulationConfig] = useState({ active: false, rootNodeId: null, severity: 'Medium' });
+  const [simulationResults, setSimulationResults] = useState({ totalImpacted: 0, depth: 0, riskScore: 0, impactedFiles: [] });
+
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchFilter, setSearchFilter] = useState('All');
+
+  // Memoize debounced standard search
+  const performSearch = useMemo(() => debounce(async (query, filter, repoIdStr) => {
+    if (!query) {
+      setSearchResults([]);
+      return;
+    }
+    if (filter === 'Semantic AI') return; // Handled separately
+    setIsSearching(true);
+    try {
+      const data = await searchCodebase(repoIdStr, query, filter);
+      setSearchResults(data.results || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSearching(false);
+    }
+  }, 500), []);
+
+  const handleSemanticSearch = async (query) => {
+    if (!query) return;
+    setIsSearching(true);
+    setSearchResults([]);
+    try {
+      const data = await semanticSearchCodebase(repoId, query);
+      setSearchResults(data.results || []);
+    } catch (err) {
+      console.error('Semantic Search Error:', err);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  useEffect(() => {
+    performSearch(searchQuery, searchFilter, repoId);
+  }, [searchQuery, searchFilter, repoId, performSearch]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -86,7 +142,8 @@ export default function RepositoryDashboard() {
     { name: 'Architecture Graph', icon: <Layers className="w-4 h-4" /> },
     { name: 'File Manifest', icon: <FileText className="w-4 h-4" /> },
     { name: 'Dependency Tree', icon: <Share2 className="w-4 h-4" /> },
-    { name: 'Security Audit', icon: <ShieldAlert className="w-4 h-4" /> }
+    { name: 'Security Audit', icon: <ShieldAlert className="w-4 h-4" /> },
+    { name: 'Onboarding Path', icon: <Layers className="w-4 h-4" /> }
   ];
 
   if (loading) {
@@ -120,16 +177,50 @@ export default function RepositoryDashboard() {
         </div>
 
         {/* Global Search in Navbar */}
-        <div className="flex-1 max-w-xl mx-8">
-          <div className="relative group">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
+        <div className="flex-1 max-w-xl mx-8 relative flex items-center gap-2">
+          <select 
+            value={searchFilter}
+            onChange={(e) => setSearchFilter(e.target.value)}
+            className="bg-slate-900/50 border border-white/10 rounded-xl py-2 px-3 text-xs focus:outline-none text-slate-300 w-28 shrink-0 hover:bg-white/5 transition-colors cursor-pointer"
+          >
+            <option value="All">All</option>
+            <option value="Files">Files</option>
+            <option value="Functions">Functions</option>
+            <option value="Semantic AI">Semantic AI</option>
+          </select>
+          <div className="relative group flex-1">
+            <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors ${searchFilter === 'Semantic AI' ? 'text-purple-500' : 'text-slate-500 group-focus-within:text-blue-400'}`} />
             <input
               type="text"
-              placeholder="Search components or files..."
+              placeholder={searchFilter === 'Semantic AI' ? "Ask AI where logic lives (Press Enter)..." : `Search ${searchFilter.toLowerCase()} in codebase...`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-900/50 border border-white/10 rounded-xl py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-slate-600"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchFilter === 'Semantic AI') {
+                  handleSemanticSearch(searchQuery);
+                }
+              }}
+              className={`w-full bg-slate-900/50 border rounded-xl py-2 pl-10 pr-4 text-sm focus:outline-none transition-all placeholder:text-slate-600 ${searchFilter === 'Semantic AI' ? 'border-purple-500/30 focus:border-purple-500/70' : 'border-white/10 focus:border-blue-500/50'}`}
             />
+            {/* Search Results Dropdown */}
+            {searchQuery && (
+              <SearchResultsPanel 
+                query={searchQuery}
+                results={searchResults}
+                loading={isSearching}
+                onClose={() => setSearchQuery('')}
+                onSelectResult={(filePath) => {
+                  const node = graphData?.nodes?.find(n => n.id === filePath);
+                  if (node) {
+                    const deps = graphData.edges.filter(e => e.source === filePath).length;
+                    const dependents = graphData.edges.filter(e => e.target === filePath).length;
+                    handleNodeSelect({ ...node, dependencies: deps, dependents: dependents });
+                  }
+                  setActiveTab('Architecture Graph');
+                  setSearchQuery(''); 
+                }}
+              />
+            )}
           </div>
         </div>
 
@@ -189,6 +280,9 @@ export default function RepositoryDashboard() {
               initialData={graphData}
               searchQuery={searchQuery} 
               onNodeSelect={handleNodeSelect} 
+              simulationConfig={simulationConfig}
+              onSimulationUpdate={setSimulationResults}
+              externalSelectedNodeId={selectedNode ? selectedNode.id : null}
             />
           )}
 
@@ -222,11 +316,19 @@ export default function RepositoryDashboard() {
               onSelect={handleNodeSelect}
             />
           )}
+
+          {activeTab === 'Onboarding Path' && (
+            <OnboardingPathPanel 
+              repoId={repoId}
+              graphData={graphData}
+              onNodeSelect={handleNodeSelect}
+            />
+          )}
         </main>
 
         {/* Right Panel (20-25%) */}
         <aside className={`w-1/4 shrink-0 transition-all duration-300 ${selectedNode ? 'translate-x-0 opacity-100' : 'translate-x-12 opacity-0'}`}>
-          {selectedNode && (
+          {selectedNode && !simulationConfig.active && (
             <NodeDetailPanel 
               selectedNode={selectedNode}
               onClose={() => handleNodeSelect(null)}
@@ -238,17 +340,47 @@ export default function RepositoryDashboard() {
               aiSummary={aiSummary}
               aiLoading={aiLoading}
               aiError={aiError}
+              onSimulate={() => {
+                const rootId = selectedNode.id || selectedNode.fullPath;
+                console.log('[DEBUG] RepositoryDashboard onSimulate Triggered. Root ID:', rootId);
+                setActiveTab('Architecture Graph');
+                setSimulationConfig({ active: true, rootNodeId: rootId, severity: 'Medium' });
+              }}
             />
           )}
-          {!selectedNode && (
+          {!selectedNode && !simulationConfig.active && (
             <div className="h-full border-l border-white/5 flex flex-col items-center justify-center p-8 text-center text-slate-600">
                <Layers className="w-12 h-12 mb-4 opacity-10" />
                <p className="text-xs italic">Select a module to view architectural context</p>
             </div>
           )}
+          
+          <BlastRadiusPanel 
+            config={simulationConfig}
+            results={simulationResults}
+            onConfigChange={setSimulationConfig}
+            onReset={() => {
+              setSimulationConfig({ active: false, rootNodeId: null, severity: 'Medium' });
+              setSimulationResults({ totalImpacted: 0, depth: 0, riskScore: 0, impactedFiles: [] });
+            }}
+          />
         </aside>
 
       </div>
+
+      <AIChatWidget 
+        repoId={repoId} 
+        onFileClick={(filePath) => {
+          const normPath = filePath.replace(/\\/g, '/');
+          const node = graphData?.nodes?.find(n => n.id === normPath || n.fullPath === normPath);
+          if (node) {
+            const deps = graphData.edges.filter(e => e.source === node.id).length;
+            const dependents = graphData.edges.filter(e => e.target === node.id).length;
+            handleNodeSelect({ ...node, dependencies: deps, dependents: dependents });
+            setActiveTab('Architecture Graph');
+          }
+        }}
+      />
     </div>
   );
 }

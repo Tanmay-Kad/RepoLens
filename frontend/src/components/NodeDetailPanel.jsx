@@ -11,7 +11,8 @@ export default function NodeDetailPanel({
   impactBarColor, 
   aiSummary, 
   aiLoading, 
-  aiError 
+  aiError,
+  onSimulate
 }) {
   if (!selectedNode) return null;
 
@@ -60,6 +61,17 @@ export default function NodeDetailPanel({
           </div>
           <p className="text-[10px] text-gray-500 mt-2">Weighted by dependents × 7 + dependencies × 3. High impact = risky to change.</p>
         </div>
+
+        <button 
+          onClick={() => {
+            console.log('[DEBUG] NodeDetailPanel Simulate Button Clicked!');
+            onSimulate();
+          }}
+          className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-red-500/20 to-orange-500/20 hover:from-red-500/30 hover:to-orange-500/30 border border-red-500/30 text-red-400 font-bold text-sm py-3 rounded-xl transition-all shadow-[0_0_15px_rgba(239,68,68,0.1)] hover:shadow-[0_0_20px_rgba(239,68,68,0.2)]"
+        >
+          <AlertTriangle className="w-4 h-4" />
+          Simulate Blast Radius
+        </button>
 
         {/* Circular dependency warning */}
         {isCircular && (
