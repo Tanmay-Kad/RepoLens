@@ -1,23 +1,34 @@
-# Environment files
+# Environment files at any level (preserve .env.example)
 .env
-.env.local
-.env.*.local
-server/.env
-client/.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
 
 # Dependencies
 node_modules/
-server/node_modules/
-client/node_modules/
+**/node_modules/
 
 # Build artifacts
 dist/
+**/dist/
 build/
-client/dist/
-server/dist/
+**/build/
+
+# Cloned repositories (runtime analysis cache)
+cloned-repos/
+backend/cloned-repos/
+**/cloned-repos/
+
+# Local database and data directories
+mongodb/
+data/
+backend/data/
+**/data/
 
 # Logs
 *.log
+**/*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

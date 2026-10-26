@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import CytoscapeComponent from 'react-cytoscapejs';
-import cytoscape from 'cytoscape';
-import { getGraphData, getAiSummary, searchFilesAi } from '../services/api';
-import { Loader2, Search, AlertTriangle, Sparkles, X, Flame, Activity } from 'lucide-react';
+import { getGraphData, getAiSummary, searchFilesAi, getRepoAudit } from '../services/api';
+import { Loader2, Search, AlertTriangle, Sparkles, X, Flame, Activity, ShieldAlert, Ghost } from 'lucide-react';
 
 export default function GraphView({ repoId }) {
   const [elements, setElements] = useState([]);
@@ -15,11 +14,17 @@ export default function GraphView({ repoId }) {
   const [aiSearchMode, setAiSearchMode] = useState(false);
   const [aiSearchLoading, setAiSearchLoading] = useState(false);
   const [dangerousFiles, setDangerousFiles] = useState([]);
+  const [unusedFiles, setUnusedFiles] = useState([]);
+  const [securityAudit, setSecurityAudit] = useState(null);
+  const [auditLoading, setAuditLoading] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [aiSummary, setAiSummary] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
   
+  const [metrics, setMetrics] = useState(null);
+  const [analysisMeta, setAnalysisMeta] = useState(null);
+
   const cyRef = useRef(null);
 
   useEffect(() => {
@@ -27,6 +32,8 @@ export default function GraphView({ repoId }) {
       try {
         setLoading(true);
         const data = await getGraphData(repoId);
+        setMetrics(data.metrics || null);
+        setAnalysisMeta(data.analysis || null);
         
         let cyElements = [];
         
@@ -44,9 +51,19 @@ export default function GraphView({ repoId }) {
             cyElements.push({
               data: {
                 id: n.id,
-                label: n.id.split('/').pop(),
+                label: n.label || n.id.split('/').pop(),
                 fullPath: n.id,
-                color: determineTypeAndColor(n.id)
+                color: determineTypeAndColor(n.id),
+                loc: n.loc ?? null,
+                folder: n.folder || '',
+                ext: n.ext || '',
+                sizeBytes: n.sizeBytes ?? null,
+                fanIn: n.fanIn ?? 0,
+                fanOut: n.fanOut ?? 0,
+                isOrphan: Boolean(n.isOrphan),
+                isEntryCandidate: Boolean(n.isEntryCandidate),
+                entryReason: n.entryReason || null,
+                isTest: Boolean(n.isTest),
               }
             });
           });
@@ -68,18 +85,55 @@ export default function GraphView({ repoId }) {
           setCircularDeps(data.circular);
         }
 
-        // Calculate dangerous files (most incoming dependents)
-        const nodeDependentsCount = {};
-        if (data.edges) {
-          data.edges.forEach(e => {
-            nodeDependentsCount[e.target] = (nodeDependentsCount[e.target] || 0) + 1;
-          });
+        // Calculate dangerous files (most incoming dependents) using backend hotspots if available
+        if (data.metrics?.hotspots && Array.isArray(data.metrics.hotspots) && data.metrics.hotspots.length > 0) {
+          setDangerousFiles(data.metrics.hotspots.slice(0, 5).map(h => ({
+            id: h.id,
+            label: h.label || h.id.split('/').pop(),
+            count: h.fanIn,
+          })));
+        } else {
+          const nodeDependentsCount = {};
+          if (data.edges) {
+            data.edges.forEach(e => {
+              nodeDependentsCount[e.target] = (nodeDependentsCount[e.target] || 0) + 1;
+            });
+          }
+          const topDangerous = Object.entries(nodeDependentsCount)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([id, count]) => ({ id, label: id.split('/').pop(), count }));
+          setDangerousFiles(topDangerous);
         }
-        const topDangerous = Object.entries(nodeDependentsCount)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 5)
-          .map(([id, count]) => ({ id, label: id.split('/').pop(), count }));
-        setDangerousFiles(topDangerous);
+
+        // Calculate isolated/orphaned files using backend orphans if available
+        if (data.metrics?.orphans && Array.isArray(data.metrics.orphans) && data.metrics.orphans.length > 0) {
+          setUnusedFiles(data.metrics.orphans.map(o => ({
+            id: o.id,
+            label: o.label || o.id.split('/').pop(),
+          })));
+        } else {
+          const nodeDependentsCount = {};
+          if (data.edges) {
+            data.edges.forEach(e => {
+              nodeDependentsCount[e.target] = (nodeDependentsCount[e.target] || 0) + 1;
+            });
+          }
+          const entryPatterns = ['index', 'main', 'app', 'server', 'vite.config', 'tailwind.config', 'eslint', 'package'];
+          const unused = (data.nodes || []).map(n => n.id).filter(id => {
+            const isEntry = entryPatterns.some(p => id.toLowerCase().includes(p));
+            return !isEntry && !nodeDependentsCount[id];
+          }).map(id => ({ id, label: id.split('/').pop() }));
+          setUnusedFiles(unused);
+        }
+
+        // Fetch security audit
+        setAuditLoading(true);
+        getRepoAudit(repoId).then(res => {
+          setSecurityAudit(res);
+        }).catch(err => console.error('Audit fetch error:', err))
+          .finally(() => setAuditLoading(false));
+
       } catch (err) {
         setError(err.message);
       } finally {
@@ -90,28 +144,32 @@ export default function GraphView({ repoId }) {
     fetchData();
   }, [repoId]);
 
+  const applyStandardFilter = useCallback((query) => {
+    if (!cyRef.current) return;
+    const q = query.toLowerCase();
+    const cy = cyRef.current;
+    cy.batch(() => {
+      cy.nodes().forEach(node => {
+        node.style('border-width', 0); // reset AI search border
+        if (!q || node.data('fullPath').toLowerCase().includes(q)) {
+          node.style('opacity', 1);
+          node.style('overlay-opacity', 0);
+        } else {
+          node.style('opacity', 0.2);
+        }
+      });
+    });
+  }, []);
+
   const handleSearch = (e) => {
     const query = e.target.value;
     setSearchQuery(query);
-    
-    if (!aiSearchMode && cyRef.current) {
-      const q = query.toLowerCase();
-      const cy = cyRef.current;
-      cy.batch(() => {
-        cy.nodes().forEach(node => {
-          node.style('border-width', 0); // reset AI search border
-          if (!q || node.data('fullPath').toLowerCase().includes(q)) {
-            node.style('opacity', 1);
-            node.style('overlay-opacity', 0);
-          } else {
-            node.style('opacity', 0.2);
-          }
-        });
-      });
+    if (!aiSearchMode) {
+      applyStandardFilter(query);
     }
   };
 
-  const executeAiSearch = async () => {
+  const executeAiSearch = useCallback(async () => {
     if (!searchQuery.trim() || !aiSearchMode) return;
     setAiSearchLoading(true);
     try {
@@ -139,7 +197,7 @@ export default function GraphView({ repoId }) {
     } finally {
       setAiSearchLoading(false);
     }
-  };
+  }, [searchQuery, aiSearchMode, elements]);
 
   useEffect(() => {
     if (aiSearchMode && searchQuery.trim()) {
@@ -147,11 +205,11 @@ export default function GraphView({ repoId }) {
         executeAiSearch();
       }, 1000); // debounce AI search
       return () => clearTimeout(timer);
-    } else if (!aiSearchMode && cyRef.current) {
-      // Re-trigger standard search
-      handleSearch({ target: { value: searchQuery } });
+    } else if (!aiSearchMode) {
+      applyStandardFilter(searchQuery);
     }
-  }, [searchQuery, aiSearchMode]);
+  }, [searchQuery, aiSearchMode, executeAiSearch, applyStandardFilter]);
+
 
   const simulateBlastRadius = () => {
     if (!cyRef.current || !selectedNode) return;
@@ -274,13 +332,13 @@ export default function GraphView({ repoId }) {
   const impactBarColor = impactScore >= 70 ? 'bg-red-500' : impactScore >= 35 ? 'bg-yellow-500' : 'bg-emerald-500';
 
   return (
-    <div className="flex w-full h-[600px] border border-white/10 rounded-2xl overflow-hidden bg-[#0f172a]/80 backdrop-blur-xl mt-8">
+    <div className="flex w-full h-[85vh] min-h-[600px] border border-white/10 rounded-2xl overflow-hidden bg-[#0f172a]/80 backdrop-blur-xl mt-8">
       
       {/* Left Sidebar - Always Visible */}
-      <div className="w-[300px] shrink-0 border-r border-white/10 bg-[#1e293b]/60 flex flex-col p-4 overflow-y-auto z-10">
+      <div className="w-[300px] shrink-0 border-r border-white/10 bg-[#1e293b]/60 flex flex-col p-4 overflow-y-auto z-10 space-y-4">
         
         {/* Search Bar */}
-        <div className="relative flex items-center mb-6">
+        <div className="relative flex items-center shrink-0">
           <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
           <input
             type="text"
@@ -298,9 +356,95 @@ export default function GraphView({ repoId }) {
           </button>
         </div>
         
+        {/* Codebase Metrics Panel */}
+        {metrics && (
+          <div className="bg-[#0f172a]/60 border border-blue-500/20 rounded-xl p-4 shrink-0 space-y-2">
+            <div className="flex items-center gap-2 mb-2 text-blue-400 font-semibold text-xs uppercase tracking-widest">
+              <Activity className="w-4 h-4" /> Codebase Metrics
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-white/5 p-2 rounded-lg" title="Total modules analyzed in dependency graph">
+                <span className="text-[10px] text-gray-400 block uppercase tracking-wider">Modules</span>
+                <span className="text-sm font-bold text-white">{metrics.files?.analyzedInGraph ?? '—'}</span>
+              </div>
+              <div className="bg-white/5 p-2 rounded-lg" title="Physical lines of code across analyzable source files">
+                <span className="text-[10px] text-gray-400 block uppercase tracking-wider">Lines of Code</span>
+                <span
+                  className="text-sm font-bold text-white"
+                  title={metrics.loc ? `${metrics.loc.total} total lines (${metrics.loc.blank} blank, ${metrics.loc.nonBlank} non-blank)` : 'Lines of code could not be measured'}
+                >
+                  {metrics.loc?.total != null ? metrics.loc.total.toLocaleString() : '—'}
+                </span>
+              </div>
+              <div className="bg-white/5 p-2 rounded-lg" title="Total files in repository excluding dependencies and build artifacts">
+                <span className="text-[10px] text-gray-400 block uppercase tracking-wider">Total Files</span>
+                <span className="text-sm font-bold text-white">{metrics.files?.total ?? '—'}</span>
+              </div>
+              <div className="bg-white/5 p-2 rounded-lg" title="Circular dependency cycles detected">
+                <span className="text-[10px] text-gray-400 block uppercase tracking-wider">Cycles</span>
+                <span className={`text-sm font-bold ${metrics.graph?.circularCount > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                  {metrics.graph?.circularCount ?? 0}
+                </span>
+              </div>
+            </div>
+            {metrics.frameworks && metrics.frameworks.length > 0 && (
+              <div className="pt-2 border-t border-white/5">
+                <span className="text-[10px] text-gray-400 block uppercase tracking-wider mb-1.5">Detected Stack</span>
+                <div className="flex flex-wrap gap-1">
+                  {metrics.frameworks.map((fw, idx) => (
+                    <span
+                      key={idx}
+                      className="px-2 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-300 border border-blue-500/20"
+                      title={`Verified via ${fw.evidencePath}`}
+                    >
+                      {fw.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Security Audit Panel */}
+        <div className="bg-[#0f172a]/60 border border-violet-500/20 rounded-xl p-4 shrink-0">
+          <div className="flex items-center gap-2 mb-3 text-violet-400 font-semibold text-xs uppercase tracking-widest">
+            <ShieldAlert className="w-4 h-4" /> Security Audit
+          </div>
+          {auditLoading ? (
+            <div className="flex items-center gap-2 text-xs text-gray-400"><Loader2 className="w-3 h-3 animate-spin"/> Checking security...</div>
+          ) : securityAudit && securityAudit.available === false ? (
+            <div className="bg-white/5 border border-white/10 rounded-lg p-2.5 text-center">
+              <span className="text-xs text-yellow-400/90 font-medium block mb-1">Unavailable</span>
+              <p className="text-[10px] text-gray-400 leading-relaxed">{securityAudit.message || 'Security audit is temporarily unavailable while it is rebuilt.'}</p>
+            </div>
+          ) : securityAudit && securityAudit.auditFound ? (
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-2 text-center flex flex-col">
+                <span className="text-xl font-bold text-red-400">{securityAudit.vulnerabilities.critical || 0}</span>
+                <span className="text-[9px] uppercase tracking-wider text-red-400/70">Critical</span>
+              </div>
+              <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-2 text-center flex flex-col">
+                <span className="text-xl font-bold text-orange-400">{securityAudit.vulnerabilities.high || 0}</span>
+                <span className="text-[9px] uppercase tracking-wider text-orange-400/70">High</span>
+              </div>
+              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-2 text-center flex flex-col">
+                <span className="text-xl font-bold text-yellow-400">{securityAudit.vulnerabilities.moderate || 0}</span>
+                <span className="text-[9px] uppercase tracking-wider text-yellow-400/70">Moderate</span>
+              </div>
+              <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2 text-center flex flex-col">
+                <span className="text-xl font-bold text-emerald-400">{securityAudit.vulnerabilities.low || 0}</span>
+                <span className="text-[9px] uppercase tracking-wider text-emerald-400/70">Low</span>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[10px] text-gray-500 leading-relaxed">{securityAudit?.message || 'No npm vulnerabilities detected or package.json missing.'}</p>
+          )}
+        </div>
+
         {/* Dangerous Files List */}
         {dangerousFiles.length > 0 && (
-          <div className="bg-[#0f172a]/60 border border-red-500/20 rounded-xl p-4 flex-1">
+          <div className="bg-[#0f172a]/60 border border-red-500/20 rounded-xl p-4 shrink-0">
             <div className="flex items-center gap-2 mb-4 text-red-400 font-semibold text-xs uppercase tracking-widest">
               <Flame className="w-4 h-4" /> Highly Depended
             </div>
@@ -329,10 +473,63 @@ export default function GraphView({ repoId }) {
             </p>
           </div>
         )}
+
+        {/* Isolated Files List */}
+        {unusedFiles.length > 0 && (
+          <div className="bg-[#0f172a]/60 border border-gray-500/20 rounded-xl p-4 shrink-0">
+            <div className="flex items-center gap-2 mb-3 text-gray-400 font-semibold text-xs uppercase tracking-widest">
+              <Ghost className="w-4 h-4" /> Isolated Files (Import Graph)
+            </div>
+            <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+              {unusedFiles.map(uf => (
+                <div
+                  key={uf.id}
+                  className="flex items-center justify-between text-xs cursor-pointer hover:bg-white/5 p-2 rounded-lg transition-colors border border-transparent hover:border-white/5"
+                  onClick={() => {
+                    if (cyRef.current) {
+                      const node = cyRef.current.getElementById(uf.id);
+                      if (node) {
+                        node.emit('tap');
+                        cyRef.current.zoom({ level: 1.5, position: node.position() });
+                      }
+                    }
+                  }}
+                >
+                  <span className="text-gray-400 truncate w-48" title={uf.id}>{uf.label}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-500 mt-3 leading-relaxed">
+              These files have zero incoming and outgoing imports in the dependency graph (excluding entry candidates, tests, and configuration files).
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Cytoscape Canvas */}
       <div className="flex-1 min-w-0 relative h-full">
+        {elements.length === 0 && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-[#0f172a]/95 backdrop-blur-md z-10">
+            <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-blue-400 shadow-xl">
+              <Ghost className="w-7 h-7" />
+            </div>
+            <h3 className="text-lg font-bold text-white mb-2">No Analyzable Dependency Graph</h3>
+            <p className="text-sm text-gray-400 max-w-lg leading-relaxed mb-4">
+              {analysisMeta?.unsupported && analysisMeta.unsupported.length > 0 ? (
+                <>
+                  No JavaScript or TypeScript files were found. Detected:{' '}
+                  {analysisMeta.unsupported.map(u => `${u.count} ${u.language} ${u.count === 1 ? 'file' : 'files'}`).join(', ')}.
+                  {' '}RepoLens currently analyzes JS/TS dependencies only.
+                </>
+              ) : (
+                'No JavaScript or TypeScript modules were detected in this repository.'
+              )}
+            </p>
+            {metrics?.files?.total != null && (
+              <span className="text-xs text-gray-500 font-mono">Total scanned files: {metrics.files.total}</span>
+            )}
+          </div>
+        )}
         <CytoscapeComponent
           elements={elements}
           style={{ width: '100%', height: '100%' }}
@@ -374,7 +571,7 @@ export default function GraphView({ repoId }) {
                 dependents: dependentFiles,
               }).then(res => {
                 setAiSummary(res.summary);
-              }).catch(err => {
+              }).catch(() => {
                 setAiError('AI summary unavailable.');
               }).finally(() => {
                 setAiLoading(false);
@@ -418,6 +615,28 @@ export default function GraphView({ repoId }) {
           </div>
 
           <div className="p-5 flex flex-col gap-5">
+
+            {/* Node Metadata Badges */}
+            <div className="flex flex-wrap gap-2 text-[11px]">
+              <span className="bg-white/5 border border-white/10 px-2.5 py-1 rounded-lg text-gray-300" title="Physical lines of code">
+                {selectedNode.loc != null ? `${selectedNode.loc} lines` : '— lines'}
+              </span>
+              {selectedNode.isEntryCandidate && (
+                <span className="bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-lg text-amber-300 font-medium" title={selectedNode.entryReason || 'Entry Candidate'}>
+                  Entry Candidate
+                </span>
+              )}
+              {selectedNode.isTest && (
+                <span className="bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-lg text-emerald-300" title="Detected as test module heuristic">
+                  Test File
+                </span>
+              )}
+              {selectedNode.isOrphan && (
+                <span className="bg-gray-500/10 border border-gray-500/20 px-2.5 py-1 rounded-lg text-gray-400" title="Isolated in import graph">
+                  Isolated
+                </span>
+              )}
+            </div>
 
             {/* Dep / Dependent counters */}
             <div className="grid grid-cols-2 gap-3">

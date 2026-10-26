@@ -1,5 +1,5 @@
 {
-  "name": "frontend",
+  "name": "repolens-ai-frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test": "node --test \"src/**/*.test.js\"",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -15,7 +16,9 @@
     "lucide-react": "^1.8.0",
     "react": "^19.2.4",
     "react-cytoscapejs": "^2.0.0",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "react-force-graph-3d": "^1.29.1",
+    "three": "^0.184.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

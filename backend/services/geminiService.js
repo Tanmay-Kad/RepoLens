@@ -1,12 +1,16 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import config from '../utils/config.js';
 
-// Initialize in each function or dynamically check so env vars are picked up if they changed?
-// Wait, we can just instantiate it globally since dotenv/config is now at the top of server.js
-const getGenAI = () => new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const getGenAI = () => {
+  if (!config.geminiApiKey) {
+    throw new Error('GEMINI_API_KEY is not configured');
+  }
+  return new GoogleGenerativeAI(config.geminiApiKey);
+};
 
 export const generateFileSummary = async ({ fileName, dependencies, dependents, repoUrl }) => {
   const genAI = getGenAI();
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({ model: config.geminiModel });
 
   // Format array if it comes as an array, else just string
   const depsStr = Array.isArray(dependencies) ? dependencies.join(', ') : dependencies;
@@ -37,7 +41,7 @@ Respond in exactly this JSON format with no markdown or extra text:
 
 export const searchFilesWithAI = async ({ query, nodes }) => {
   const genAI = getGenAI();
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({ model: config.geminiModel });
 
   // Pass max 200 nodes to avoid massive token usage, or just pass all if small.
   // We'll pass the node IDs (file paths)

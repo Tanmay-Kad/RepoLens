@@ -1,83 +1,81 @@
-# RepoNav - Repository Architecture Navigator
+# 🔭 RepoLens - AI-Powered Architecture Visualizer
 
-RepoNav is a MERN-based developer productivity tool that ingests a public GitHub repository URL, performs static dependency analysis, and visualizes the architecture as an interactive graph.
+> [!NOTE]
+> **Documentation Notice**: This README contains legacy architecture and configuration references (e.g., Gemini Pro 1.5 and older environment variables). It is currently outdated pending a full documentation rewrite.
 
-## Features
+RepoLens is a powerful developer productivity tool that ingests public GitHub repositories, performs static dependency analysis, and visualizes the codebase as an interactive, AI-assisted architecture graph. Understand foreign codebases in seconds, not days.
 
-- Analyze public GitHub repositories (up to 200 filtered source files)
-- Build file dependency graph from imports (`js/ts/jsx/tsx/py`)
-- Identify `entry`, `core`, `utility`, and `external` nodes
-- Compute risk scores and highlight high-impact files
-- Recommend onboarding path for new developers
-- Generate AI file summaries on click (Google Gemini API)
-- Natural language search to highlight relevant subgraphs
-- 24-hour graph caching in MongoDB
 
-## Tech Stack
+## ✨ Features
 
-- Frontend: React + Vite + TailwindCSS + Zustand + react-force-graph-2d
-- Backend: Node.js + Express + Mongoose + tree-sitter + Octokit + Gemini SDK
-- Database: MongoDB
+- **Interactive Architecture Graph**: Automatically maps out imports and dependencies into a fully navigable Cytoscape graph.
+- **💥 Blast Radius Simulator**: Select any core file to simulate breaking changes. The graph will recursively trace and highlight the exact "blast radius" of downstream systems affected by your changes.
+- **🤖 AI Semantic Search**: Ask Gemini AI natural language questions like *"Where is the auth logic?"* and it will automatically highlight the relevant files in the graph.
+- **AI File Summaries**: Click on any node to get an instant AI-generated summary of its purpose, importance, and risks associated with modifying it.
+- **🛡️ Automated Security Audit**: Automatically runs an `npm audit` on the repository's dependencies and displays a beautifully color-coded security vulnerability panel.
+- **👻 Dead Code Detector**: Intelligently identifies "orphaned" or unused files that have zero incoming dependencies and are not standard entry points.
+- **🔥 Highly Depended Files**: Instantly see which files represent architectural bottlenecks based on their dependency weight.
 
-## Project Structure
+## 🛠️ Tech Stack
 
-- `server/` - API, ingestion, parsing, graph building, AI integration
-- `client/` - Graph UI and interaction layer
+- **Frontend**: React + Vite + TailwindCSS + Cytoscape.js + Lucide React
+- **Backend**: Node.js + Express + Mongoose + Madge (Graph Analysis)
+- **AI**: Google Gemini Pro 1.5 API
+- **Database**: MongoDB
 
-## Setup
+## 📂 Project Structure
+
+- `backend/` - Handles GitHub cloning, static graph extraction (Madge), MongoDB caching, and Gemini API proxying.
+- `frontend/` - Handles the React application, Cytoscape graph rendering, and data visualization panels.
+
+## 🚀 Setup & Installation
 
 ### 1) Install dependencies
 
+Open two terminals for the frontend and backend.
+
 ```bash
-cd server && npm install
-cd ../client && npm install
+# Terminal 1 (Backend)
+cd backend
+npm install
+
+# Terminal 2 (Frontend)
+cd frontend
+npm install
 ```
 
 ### 2) Configure environment variables
 
-Create `server/.env` and add:
+Create a `backend/.env` file with the following variables:
 
 ```env
 PORT=5000
-MONGODB_URI=mongodb://localhost:27017/reponav
-GEMINI_API_KEY=AIza...
-GEMINI_MODEL=gemini-1.5-flash
-GITHUB_TOKEN=ghp_... # optional
+MONGO_URI=mongodb+srv://<user>:<password>@cluster.mongodb.net/repolens
+GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-Create `client/.env` and add:
-
-```env
-VITE_API_URL=http://localhost:5000
-```
-
-### 3) Run application
-
-Terminal 1:
+### 3) Run the application
 
 ```bash
-cd server && npm run dev
+# Terminal 1 (Backend)
+cd backend
+npm run dev
+
+# Terminal 2 (Frontend)
+cd frontend
+npm run dev
 ```
 
-Terminal 2:
+Open the Vite local server URL (usually `http://localhost:5173`) and paste any public GitHub repository URL!
 
-```bash
-cd client && npm run dev
-```
+## 🔗 Core API Endpoints
 
-Open the Vite URL and paste a repo URL such as:
+- `POST /api/analyze` - Clones a repository and initiates static analysis.
+- `GET /api/graph/:repoId` - Fetches the generated dependency graph (nodes & edges).
+- `GET /api/audit/:repoId` - Triggers an `npm audit` on the cloned repository.
+- `POST /api/ai/summary` - Requests an AI-generated architectural summary of a specific file.
+- `POST /api/ai/search` - Translates a natural language query into a list of relevant graph node IDs.
 
-`https://github.com/expressjs/express`
-
-## API Endpoints
-
-- `POST /api/analyze` `{ repoUrl }`
-- `GET /api/graph/:repoId`
-- `POST /api/query/summarize` `{ repoId, nodeId }` (SSE style response)
-- `POST /api/query/search` `{ repoId, query }`
-
-## Notes
-
-- Private repos require `GITHUB_TOKEN`.
-- If GitHub rate limit is hit, add `GITHUB_TOKEN` to increase limits.
-- If Gemini fails, summary gracefully falls back to `"Summary unavailable"`.
+## ⚠️ Notes
+- The backend clones repositories locally into a `cloned-repos/` folder for analysis.
+- If you hit Gemini AI rate limits (`429 Too Many Requests`), wait a few seconds and try again. Free tier limits apply.

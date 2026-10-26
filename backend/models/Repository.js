@@ -27,6 +27,14 @@ const repositorySchema = new mongoose.Schema({
     type: Object,
     default: {},
   },
+  analyzerVersion: {
+    type: Number,
+    default: 0,
+  },
+  analysis: {
+    type: Object,
+    default: {},
+  },
   // Keyed by file path, stores cached Gemini AI summaries per node
   aiSummaries: {
     type: Map,
