@@ -78,4 +78,26 @@ describe('folderTree', () => {
     assert.equal(tree[0].children[0].name, 'helpers');
     assert.equal(tree[0].children[0].children[0].name, 'format.js');
   });
+
+  it('lists root files at the top level and never inside a folder named "."', () => {
+    const nodes = [
+      { id: 'index.js', folder: '.' },
+      { id: './package.json', folder: '.' },
+      { id: '.env.example', folder: '.' },
+      { id: 'src/app.js', folder: 'src' },
+    ];
+    const tree = buildFolderTree(nodes);
+
+    // Should have folder 'src' first, then top-level files
+    assert.equal(tree[0].name, 'src');
+    assert.equal(tree[0].type, 'folder');
+
+    // No folder named "." should ever exist
+    const hasDotFolder = tree.some(item => item.name === '.' && item.type === 'folder');
+    assert.equal(hasDotFolder, false, 'Tree must not contain a folder named "."');
+
+    // Root files must be top-level files
+    const fileNames = tree.filter(item => item.type === 'file').map(item => item.name);
+    assert.deepEqual(fileNames, ['.env.example', 'index.js', 'package.json']);
+  });
 });

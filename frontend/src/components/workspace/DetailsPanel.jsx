@@ -10,12 +10,16 @@ import {
   ArrowRight,
   ArrowDownLeft,
   Info,
+  Target,
+  RotateCcw,
 } from 'lucide-react';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import { getAiSummary } from '../../services/api';
-import { KIND_DEFINITIONS, NODE_KINDS } from '../../models/graphModel';
+import { KIND_DEFINITIONS, NODE_KINDS, computeImpactScore, computeTransitiveDependents } from '../../models/graphModel';
+import { splitNodesByCategory } from '../../models/scopeModel';
+import { FOCUS_DIRECTIONS } from '../../models/focusModel';
 
 /**
  * Right details panel component
@@ -28,12 +32,20 @@ export default function DetailsPanel({
   onClose,
   isSimulatingBlast,
   onToggleBlastRadius,
+  focusConfig,
+  onSetFocus,
+  onClearFocus,
   className = '',
 }) {
   const [copied, setCopied] = useState(false);
   const [aiSummary, setAiSummary] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
+
+  // Focus mode control state
+  const [focusDepth, setFocusDepth] = useState(1);
+  const [focusDirection, setFocusDirection] = useState(FOCUS_DIRECTIONS.BOTH);
+  const [focusRespectScope, setFocusRespectScope] = useState(true);
 
   const nodeId = selectedNode?.id;
 
@@ -45,9 +57,21 @@ export default function DetailsPanel({
   const fanIn = incoming.length;
   const fanOut = outgoing.length;
 
-  // Exact impact score calculation from Part 1 inventory:
-  // Math.min(100, Math.round((dependents * 7) + (dependencies * 3)))
-  const impactScore = Math.min(100, Math.round(fanIn * 7 + fanOut * 3));
+  const splitIncoming = useMemo(
+    () => splitNodesByCategory(incoming, model?.nodeMap),
+    [incoming, model?.nodeMap]
+  );
+
+  const impactScore = computeImpactScore(fanIn, fanOut);
+  const transitiveDependents = useMemo(() => computeTransitiveDependents(nodeId, model?.dependents), [nodeId, model?.dependents]);
+
+  const splitBlast = useMemo(
+    () => splitNodesByCategory(Array.from(transitiveDependents), model?.nodeMap),
+    [transitiveDependents, model?.nodeMap]
+  );
+
+  const isCurrentNodeFocused = focusConfig?.active && focusConfig.rootNodeId === nodeId;
+
   let impactLabel = 'Low';
   let impactColor = 'text-emerald-400';
   let impactBarColor = 'bg-emerald-500';
@@ -248,17 +272,119 @@ export default function DetailsPanel({
             <div className="text-xl font-bold font-mono text-content-primary">{fanOut}</div>
             <div className="text-[10px] uppercase tracking-wider text-content-muted mt-0.5">Dependencies (Out)</div>
           </div>
-          <div className="bg-surface-raised p-2.5 rounded-sm border border-border-subtle" title="Files that directly import this module">
-            <div className="text-xl font-bold font-mono text-accent">{fanIn}</div>
-            <div className="text-[10px] uppercase tracking-wider text-content-muted mt-0.5">Dependents (In)</div>
+          <div className="bg-surface-raised p-2.5 rounded-sm border border-border-subtle" title={`${splitIncoming.total} dependents (${splitIncoming.sourceCount} source, ${splitIncoming.nonSourceCount} tests/examples)`}>
+            <div className="text-xl font-bold font-mono text-accent">{splitIncoming.total}</div>
+            <div className="text-[10px] tracking-wider text-content-muted mt-0.5">
+              Dependents ({splitIncoming.sourceCount} src, {splitIncoming.nonSourceCount} other)
+            </div>
           </div>
+        </div>
+
+        {/* Focus Mode Neighborhood Explorer */}
+        <div className="bg-surface-raised p-3 rounded-sm border border-border-subtle space-y-2.5">
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center gap-1.5 font-semibold text-content-primary">
+              <Target className="w-3.5 h-3.5 text-accent" aria-hidden="true" />
+              <span>Focus Mode</span>
+            </div>
+            {isCurrentNodeFocused ? (
+              <span className="text-[10px] text-accent font-mono bg-accent/10 px-1.5 py-0.5 rounded border border-accent/20">
+                Active
+              </span>
+            ) : null}
+          </div>
+
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-[11px] text-content-muted">Depth:</span>
+            <div className="flex rounded-sm bg-surface-overlay p-0.5 border border-border-subtle">
+              <button
+                type="button"
+                onClick={() => setFocusDepth(1)}
+                className={`px-2 py-0.5 text-[11px] rounded-xs font-mono transition-colors ${
+                  focusDepth === 1
+                    ? 'bg-accent text-white font-semibold'
+                    : 'text-content-secondary hover:text-content-primary'
+                }`}
+              >
+                1
+              </button>
+              <button
+                type="button"
+                onClick={() => setFocusDepth(2)}
+                className={`px-2 py-0.5 text-[11px] rounded-xs font-mono transition-colors ${
+                  focusDepth === 2
+                    ? 'bg-accent text-white font-semibold'
+                    : 'text-content-secondary hover:text-content-primary'
+                }`}
+              >
+                2
+              </button>
+            </div>
+
+            <span className="text-[11px] text-content-muted ml-auto">Direction:</span>
+            <select
+              value={focusDirection}
+              onChange={(e) => setFocusDirection(e.target.value)}
+              aria-label="Focus direction"
+              className="bg-surface-overlay border border-border-subtle rounded-sm text-[11px] px-1.5 py-0.5 text-content-primary focus:outline-none focus:border-accent"
+            >
+              <option value={FOCUS_DIRECTIONS.BOTH}>Both</option>
+              <option value={FOCUS_DIRECTIONS.DEPENDENTS}>Dependents</option>
+              <option value={FOCUS_DIRECTIONS.DEPENDENCIES}>Dependencies</option>
+            </select>
+          </div>
+
+          <label className="flex items-center gap-1.5 text-[11px] text-content-muted cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={focusRespectScope}
+              onChange={(e) => setFocusRespectScope(e.target.checked)}
+              className="rounded-xs border-border-default text-accent focus:ring-0 w-3 h-3"
+            />
+            <span>Respect current category scope</span>
+          </label>
+
+          {isCurrentNodeFocused ? (
+            <div className="space-y-1.5">
+              <div className="text-[11px] text-accent leading-tight font-mono">
+                Focused neighborhood: {focusConfig?.neighborhood?.dependentCount ?? splitIncoming.total} dependents, {focusConfig?.neighborhood?.dependencyCount ?? fanOut} dependencies at depth {focusConfig?.depth || focusDepth}.
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onClearFocus}
+                className="w-full text-xs flex items-center justify-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Exit Focus (Esc)</span>
+              </Button>
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() =>
+                onSetFocus &&
+                onSetFocus({
+                  rootNodeId: nodeId,
+                  depth: focusDepth,
+                  direction: focusDirection,
+                  respectScope: focusRespectScope,
+                })
+              }
+              className="w-full text-xs flex items-center justify-center gap-1.5"
+            >
+              <Target className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Focus Neighborhood</span>
+            </Button>
+          )}
         </div>
 
         {/* Impact Score Card */}
         <div className="bg-surface-raised p-3 rounded-sm border border-border-subtle space-y-2">
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold uppercase tracking-wider text-content-muted text-[11px]">
-              Impact Score
+              Impact Score (direct-only)
             </span>
             <span className={`font-mono font-bold ${impactColor}`}>
               {impactLabel} ({impactScore}/100)
@@ -273,24 +399,32 @@ export default function DetailsPanel({
           </div>
 
           <p className="text-[11px] text-content-muted leading-tight">
-            Heuristic based on fan-in (70%) and fan-out (30%): (dependents × 7) + (dependencies × 3). Identifies modules with highest blast risk.
+            Formula: min(100, direct dependents × 7 + direct dependencies × 3). Counts direct dependents and dependencies only, capped at 100. High (≥70), Medium (≥35), and Low (&lt;35) thresholds are arbitrary heuristic indicators of coupling.
           </p>
         </div>
 
         {/* Blast Radius Simulation Toggle */}
-        <div>
+        <div className="space-y-1.5">
           <button
             type="button"
             onClick={onToggleBlastRadius}
-            className={`w-full flex items-center justify-center gap-2 py-2 px-3 rounded-sm text-xs font-semibold uppercase tracking-wider border transition-colors duration-fast focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
+            className={`w-full flex items-center justify-between py-2 px-3 rounded-sm text-xs font-semibold uppercase tracking-wider border transition-colors duration-fast focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
               isSimulatingBlast
                 ? 'bg-rose-500/20 border-rose-500/50 text-rose-300 shadow-sm'
                 : 'bg-surface-raised border-border-default text-rose-400 hover:bg-surface-overlay hover:border-rose-500/40'
             }`}
           >
-            <Activity className="w-4 h-4 shrink-0" aria-hidden="true" />
-            <span>{isSimulatingBlast ? 'Clear Blast Radius' : 'Simulate Blast Radius'}</span>
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <span>{isSimulatingBlast ? 'Clear Blast Radius' : 'Simulate Blast Radius'}</span>
+            </div>
+            <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-surface-panel border border-border-subtle">
+              {splitBlast.total} {splitBlast.total === 1 ? 'file' : 'files'}
+            </span>
           </button>
+          <p className="text-[10px] text-content-muted leading-tight">
+            Blast radius: {splitBlast.summaryLabel}. All files directly or transitively importing this file. Differs from impact score, which measures direct coupling only.
+          </p>
         </div>
 
         {/* Dependencies List (Outgoing) */}

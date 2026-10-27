@@ -27,7 +27,7 @@ export function buildFolderTree(nodes = []) {
     if (!node || !node.id) continue;
 
     const normalizedPath = String(node.id).replace(/\\/g, '/');
-    const parts = normalizedPath.split('/').filter(Boolean);
+    const parts = normalizedPath.split('/').filter(p => Boolean(p) && p !== '.');
 
     let current = root;
     let accumulatedPath = '';

@@ -16,6 +16,9 @@ import {
   Compass,
   CheckCircle2,
   HelpCircle,
+  SlidersHorizontal,
+  Filter,
+  RotateCcw,
 } from 'lucide-react';
 import Section from '../ui/Section';
 import Badge from '../ui/Badge';
@@ -23,10 +26,12 @@ import IconButton from '../ui/IconButton';
 import Button from '../ui/Button';
 import { buildFolderTree } from '../../models/folderTree';
 import { NODE_KINDS, KIND_DEFINITIONS } from '../../models/graphModel';
+import { normalizeFrameworks } from '../../models/frameworks';
+import { SCOPE_CATEGORIES } from '../../models/scopeModel';
 import { searchFilesAi } from '../../services/api';
 
 /**
- * Left sidebar component with Search, File Tree, Architecture Health, and Overview sections.
+ * Left sidebar component with Search, Filters, File Tree, Architecture Health, and Overview sections.
  */
 export default function Sidebar({
   model,
@@ -37,6 +42,16 @@ export default function Sidebar({
   onHighlightCycle,
   activeCycle,
   onAiSearchResults,
+  viewScope,
+  onToggleCategory,
+  onToggleExtension,
+  onSetMinFanIn,
+  onToggleIsolated,
+  onFocusFolder,
+  onHideFolder,
+  onClearFolderExcludes,
+  onResetScope,
+  visibleSubgraph,
   className = '',
 }) {
   const [isAiSearchMode, setIsAiSearchMode] = useState(false);
@@ -116,12 +131,13 @@ export default function Sidebar({
     setAiSearchError(null);
   };
 
-  // Filtered most imported files (fanIn >= 2)
+  // Filtered most imported files (respecting active scope)
   const mostImportedFiles = useMemo(() => {
-    return [...nodes]
-      .filter((n) => n.fanIn >= 2)
-      .sort((a, b) => b.fanIn - a.fanIn);
-  }, [nodes]);
+    const list = visibleSubgraph?.visibleNodes || nodes;
+    return [...list]
+      .filter((n) => (n.fanIn || 0) >= (viewScope?.minFanIn || 2))
+      .sort((a, b) => (b.fanIn || 0) - (a.fanIn || 0));
+  }, [visibleSubgraph?.visibleNodes, nodes, viewScope?.minFanIn]);
 
   // Isolated files
   const isolatedFiles = useMemo(() => {
@@ -137,13 +153,15 @@ export default function Sidebar({
       const isOpen = !collapsedFolders.has(item.path);
       return (
         <div key={item.path} className="select-none">
-          <button
-            type="button"
-            onClick={() => toggleFolder(item.path)}
+          <div
             style={{ paddingLeft }}
-            className="w-full flex items-center justify-between py-1 pr-2 text-xs text-content-secondary hover:text-content-primary hover:bg-surface-raised rounded-sm transition-colors duration-fast focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            className="group w-full flex items-center justify-between py-1 pr-2 text-xs text-content-secondary hover:text-content-primary hover:bg-surface-raised rounded-sm transition-colors duration-fast"
           >
-            <div className="flex items-center gap-1.5 min-w-0">
+            <button
+              type="button"
+              onClick={() => toggleFolder(item.path)}
+              className="flex items-center gap-1.5 min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            >
               <ChevronRight
                 className={`w-3.5 h-3.5 text-content-muted shrink-0 transition-transform duration-fast ${
                   isOpen ? 'rotate-90' : ''
@@ -156,11 +174,37 @@ export default function Sidebar({
                 <Folder className="w-3.5 h-3.5 text-content-muted shrink-0" aria-hidden="true" />
               )}
               <span className="truncate font-medium">{item.name}</span>
+            </button>
+            <div className="flex items-center gap-1">
+              <div className="hidden group-hover:flex items-center gap-1">
+                <button
+                  type="button"
+                  title={`Focus folder ${item.path}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onFocusFolder && onFocusFolder(item.path);
+                  }}
+                  className="px-1 py-0.5 text-[9px] rounded-xs bg-accent/20 hover:bg-accent text-white font-mono"
+                >
+                  Focus
+                </button>
+                <button
+                  type="button"
+                  title={`Hide folder ${item.path}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onHideFolder && onHideFolder(item.path);
+                  }}
+                  className="px-1 py-0.5 text-[9px] rounded-xs bg-surface-overlay hover:bg-rose-500/30 text-content-muted hover:text-rose-300 font-mono"
+                >
+                  Hide
+                </button>
+              </div>
+              <span className="text-[11px] text-content-muted font-mono ml-1">
+                {item.fileCount}
+              </span>
             </div>
-            <span className="text-[11px] text-content-muted font-mono ml-2">
-              {item.fileCount}
-            </span>
-          </button>
+          </div>
 
           {isOpen && item.children && (
             <div>
@@ -305,7 +349,149 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* 2. Files Section (Lazy Folder Tree) */}
+      {/* 2. Graph Scope & Filters Section */}
+      <Section
+        id="scope-filters"
+        title="Graph Scope & Filters"
+        icon={SlidersHorizontal}
+        defaultOpen={true}
+        badge={
+          visibleSubgraph?.hiddenCounts?.total > 0 ? (
+            <span className="text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded font-mono">
+              {visibleSubgraph.hiddenCounts.total} hidden
+            </span>
+          ) : null
+        }
+      >
+        <div className="space-y-3 pt-1 text-xs">
+          {/* Categories */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="font-semibold text-content-secondary">Categories</span>
+              <span className="text-[10px] text-content-muted italic">heuristic</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {[
+                { key: SCOPE_CATEGORIES.SOURCE, label: 'Source', count: visibleSubgraph?.categoryCounts?.source ?? 0, color: 'text-emerald-400' },
+                { key: SCOPE_CATEGORIES.TEST, label: 'Tests', count: visibleSubgraph?.categoryCounts?.test ?? 0, color: 'text-amber-400' },
+                { key: SCOPE_CATEGORIES.EXAMPLE, label: 'Examples', count: visibleSubgraph?.categoryCounts?.example ?? 0, color: 'text-blue-400' },
+                { key: SCOPE_CATEGORIES.TOOLING, label: 'Tooling', count: visibleSubgraph?.categoryCounts?.tooling ?? 0, color: 'text-purple-400' },
+              ].map(({ key, label, count, color }) => {
+                const isChecked = viewScope?.categories ? viewScope.categories.has(key) : true;
+                return (
+                  <label
+                    key={key}
+                    className={`flex items-center justify-between p-1.5 rounded-sm border cursor-pointer select-none transition-colors ${
+                      isChecked
+                        ? 'bg-surface-raised border-border-default'
+                        : 'bg-surface-app/40 border-border-subtle opacity-60'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => onToggleCategory && onToggleCategory(key)}
+                        className="rounded-xs border-border-default text-accent focus:ring-0 w-3 h-3"
+                      />
+                      <span className={`truncate text-[11px] font-medium ${color}`}>{label}</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-content-muted ml-1">{count}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Extension Chips */}
+          {visibleSubgraph?.extensionCounts && Object.keys(visibleSubgraph.extensionCounts).length > 0 && (
+            <div>
+              <span className="font-semibold text-content-secondary block mb-1">Extensions</span>
+              <div className="flex flex-wrap gap-1">
+                {Object.entries(visibleSubgraph.extensionCounts)
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 8)
+                  .map(([ext, count]) => {
+                    const isSelected = viewScope?.extensions && viewScope.extensions.has(ext);
+                    return (
+                      <button
+                        key={ext}
+                        type="button"
+                        onClick={() => onToggleExtension && onToggleExtension(ext)}
+                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded-sm border transition-colors ${
+                          isSelected
+                            ? 'bg-accent/20 border-accent text-accent font-semibold'
+                            : 'bg-surface-raised border-border-subtle text-content-secondary hover:border-border-default'
+                        }`}
+                      >
+                        {ext} ({count})
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+
+          {/* Min Fan-in Control */}
+          <div className="flex items-center justify-between">
+            <label htmlFor="min-fan-in" className="text-content-secondary">
+              Min Fan-In: <span className="font-mono text-content-primary">{viewScope?.minFanIn || 0}</span>
+            </label>
+            <input
+              id="min-fan-in"
+              type="range"
+              min="0"
+              max="15"
+              step="1"
+              value={viewScope?.minFanIn || 0}
+              onChange={(e) => onSetMinFanIn && onSetMinFanIn(parseInt(e.target.value, 10))}
+              className="w-24 accent-accent cursor-pointer"
+            />
+          </div>
+
+          {/* Isolated Files Toggle */}
+          <label className="flex items-center justify-between cursor-pointer select-none">
+            <span className="text-content-secondary">Show isolated files on canvas</span>
+            <input
+              type="checkbox"
+              checked={Boolean(viewScope?.showIsolated)}
+              onChange={(e) => onToggleIsolated && onToggleIsolated(e.target.checked)}
+              className="rounded-xs border-border-default text-accent focus:ring-0 w-3.5 h-3.5"
+            />
+          </label>
+
+          {/* Active Folder Filter Badges */}
+          {(viewScope?.folderInclude || (viewScope?.folderExclude && viewScope.folderExclude.size > 0)) && (
+            <div className="p-1.5 rounded-sm bg-surface-overlay text-[10px] space-y-1">
+              {viewScope.folderInclude && (
+                <div className="flex items-center justify-between text-accent">
+                  <span className="truncate">Focus: {viewScope.folderInclude}</span>
+                  <button type="button" onClick={() => onFocusFolder && onFocusFolder(null)} className="underline ml-1">Clear</button>
+                </div>
+              )}
+              {viewScope?.folderExclude && viewScope.folderExclude.size > 0 && (
+                <div className="flex items-center justify-between text-content-muted">
+                  <span>Excluded folders: {viewScope.folderExclude.size}</span>
+                  <button type="button" onClick={() => onClearFolderExcludes && onClearFolderExcludes()} className="underline ml-1">Reset</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Reset Filters */}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onResetScope}
+            className="w-full text-xs text-content-muted hover:text-content-primary flex items-center justify-center gap-1.5 py-1"
+          >
+            <RotateCcw className="w-3 h-3" aria-hidden="true" />
+            <span>Reset Scope & Filters</span>
+          </Button>
+        </div>
+      </Section>
+
+      {/* 3. Files Section (Lazy Folder Tree) */}
       <Section
         title="Files"
         icon={Folder}
@@ -453,9 +639,9 @@ export default function Sidebar({
             <span className="font-mono font-semibold text-content-primary">{nodes.length}</span>
           </div>
 
-          <div className="flex items-center justify-between py-1 border-b border-border-subtle" title={metricDefinitions.totalFiles || 'Total files found in repository clone'}>
+          <div className="flex items-center justify-between py-1 border-b border-border-subtle" title={metricDefinitions['files.total'] || metricDefinitions.totalFiles || 'Total files found in repository clone'}>
             <span className="text-content-secondary">Total Repository Files:</span>
-            <span className="font-mono text-content-primary">{metrics.totalFiles ?? '—'}</span>
+            <span className="font-mono text-content-primary">{(metrics.files?.total ?? metrics.totalFiles) ?? '—'}</span>
           </div>
 
           <div className="flex items-center justify-between py-1 border-b border-border-subtle" title="Total import edges between modules">
@@ -463,29 +649,29 @@ export default function Sidebar({
             <span className="font-mono text-content-primary">{model?.rawEdges?.length || 0}</span>
           </div>
 
-          <div className="flex items-center justify-between py-1 border-b border-border-subtle" title={metricDefinitions.sourceLoc || 'Physical lines of code in analyzed JS/TS source files'}>
+          <div className="flex items-center justify-between py-1 border-b border-border-subtle" title={metricDefinitions['loc.total'] || metricDefinitions.sourceLoc || 'Physical lines of code in analyzed JS/TS source files'}>
             <span className="text-content-secondary">Source LOC (JS/TS):</span>
             <span className="font-mono text-content-primary">
-              {metrics.sourceLoc != null ? metrics.sourceLoc.toLocaleString() : '—'}
+              {(metrics.loc?.total ?? metrics.sourceLoc) != null ? (metrics.loc?.total ?? metrics.sourceLoc).toLocaleString() : '—'}
             </span>
           </div>
 
-          <div className="flex items-center justify-between py-1 border-b border-border-subtle" title={metricDefinitions.circularCount || 'Circular dependency chains'}>
+          <div className="flex items-center justify-between py-1 border-b border-border-subtle" title={metricDefinitions['graph.circularCount'] || metricDefinitions.circularCount || 'Circular dependency chains'}>
             <span className="text-content-secondary">Circular Dependency Chains:</span>
             <span className="font-mono text-content-primary">{circular.length}</span>
           </div>
 
-          {metrics.frameworks && Object.keys(metrics.frameworks).length > 0 && (
+          {normalizeFrameworks(metrics.frameworks).length > 0 && (
             <div className="py-1 border-b border-border-subtle">
               <span className="text-content-secondary block mb-1">Detected Frameworks:</span>
               <div className="flex flex-wrap gap-1.5">
-                {Object.entries(metrics.frameworks).map(([name, data]) => (
+                {normalizeFrameworks(metrics.frameworks).map((fw) => (
                   <Badge
-                    key={name}
+                    key={fw.key}
                     variant="default"
-                    title={`Evidence: ${data?.evidence || 'package.json'}`}
+                    title={`Evidence: ${fw.evidence}`}
                   >
-                    {name}
+                    {fw.name}
                   </Badge>
                 ))}
               </div>

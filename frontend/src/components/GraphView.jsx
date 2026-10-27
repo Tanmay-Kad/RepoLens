@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import CytoscapeComponent from 'react-cytoscapejs';
 import { getGraphData, getAiSummary, searchFilesAi, getRepoAudit } from '../services/api';
+import { computeImpactScore } from '../models/graphModel';
 import { Loader2, Search, AlertTriangle, Sparkles, X, Flame, Activity, ShieldAlert, Ghost } from 'lucide-react';
 
 export default function GraphView({ repoId }) {
@@ -322,9 +323,9 @@ export default function GraphView({ repoId }) {
 
   const isCircular = selectedNode && circularDeps.some(circle => circle.includes(selectedNode.fullPath));
 
-  // Impact score: weighted combination of dependents (how many rely on this file) and deps (coupling)
+  // Impact score: weighted combination of direct dependents and dependencies
   const impactScore = selectedNode
-    ? Math.min(100, Math.round((selectedNode.dependents * 7) + (selectedNode.dependencies * 3)))
+    ? computeImpactScore(selectedNode.dependents, selectedNode.dependencies)
     : 0;
 
   const impactLabel = impactScore >= 70 ? 'High' : impactScore >= 35 ? 'Medium' : 'Low';
@@ -662,7 +663,7 @@ export default function GraphView({ repoId }) {
                   style={{ width: `${impactScore}%` }}
                 />
               </div>
-              <p className="text-[10px] text-gray-500 mt-2">Weighted by dependents × 7 + dependencies × 3. High impact = risky to change.</p>
+              <p className="text-[10px] text-gray-500 mt-2">Formula: min(100, direct dependents × 7 + direct dependencies × 3). Counts direct couplings only, capped at 100.</p>
             </div>
 
             {/* Blast Radius Button */}

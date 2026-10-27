@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   buildGraphModel,
   classifyNodeKind,
+  computeImpactScore,
+  computeTransitiveDependents,
   NODE_KINDS,
   KIND_DEFINITIONS,
 } from './graphModel.js';
@@ -108,5 +110,40 @@ describe('graphModel', () => {
       assert.ok(KIND_DEFINITIONS[kind].description);
       assert.ok(KIND_DEFINITIONS[kind].colorHex);
     }
+  });
+
+  it('computes impact score formula min(100, fanIn*7 + fanOut*3)', () => {
+    assert.equal(computeImpactScore(0, 0), 0);
+    assert.equal(computeImpactScore(1, 0), 7);
+    assert.equal(computeImpactScore(0, 1), 3);
+    assert.equal(computeImpactScore(10, 0), 70);
+    assert.equal(computeImpactScore(0, 10), 30);
+    assert.equal(computeImpactScore(10, 10), 100);
+    assert.equal(computeImpactScore(25, 25), 100);
+    assert.equal(computeImpactScore(null, undefined), 0);
+    assert.equal(computeImpactScore(-5, -2), 0);
+  });
+
+  it('computes transitive dependents for blast radius accurately', () => {
+    // A -> B -> C (A imports B, B imports C)
+    // Dependents map: target -> incoming sources
+    // C has incoming from B; B has incoming from A
+    const dependentsMap = new Map([
+      ['C', ['B']],
+      ['B', ['A']],
+      ['A', []],
+    ]);
+
+    const blastC = computeTransitiveDependents('C', dependentsMap);
+    assert.equal(blastC.size, 2);
+    assert.ok(blastC.has('B'));
+    assert.ok(blastC.has('A'));
+
+    const blastB = computeTransitiveDependents('B', dependentsMap);
+    assert.equal(blastB.size, 1);
+    assert.ok(blastB.has('A'));
+
+    const blastA = computeTransitiveDependents('A', dependentsMap);
+    assert.equal(blastA.size, 0);
   });
 });

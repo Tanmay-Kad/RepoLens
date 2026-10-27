@@ -447,6 +447,20 @@ export const detectEntryCandidates = async (manifestFiles, htmlFiles, allFiles, 
 };
 
 /**
+ * Computes architectural impact score for a module.
+ * Formula: min(100, direct_dependents * 7 + direct_dependencies * 3)
+ *
+ * @param {number} fanIn - Direct dependent count (incoming)
+ * @param {number} fanOut - Direct dependency count (outgoing)
+ * @returns {number} Integer between 0 and 100
+ */
+export const computeImpactScore = (fanIn = 0, fanOut = 0) => {
+  const fi = Math.max(0, Number(fanIn) || 0);
+  const fo = Math.max(0, Number(fanOut) || 0);
+  return Math.min(100, Math.round(fi * 7 + fo * 3));
+};
+
+/**
  * Computes all defined metrics and enriches graph nodes.
  * Pure function: receives raw graph, repo files, and root path.
  *
@@ -618,6 +632,7 @@ export const computeRepoMetrics = async ({
       label: n.label,
       fanIn: n.fanIn,
       fanOut: n.fanOut,
+      impactScore: computeImpactScore(n.fanIn, n.fanOut),
     }));
 
   // 8. Orphans: isolated in import graph, excluding entry candidates, tests, and config files
@@ -699,6 +714,7 @@ export default {
   detectFrameworks,
   detectEntryCandidates,
   computeRepoMetrics,
+  computeImpactScore,
   normalizeRepoPath,
   METRIC_DEFINITIONS,
   EXCLUDED_DIRS,

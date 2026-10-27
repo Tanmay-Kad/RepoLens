@@ -177,6 +177,9 @@ export const analyzeRepository = async (req, res) => {
   }
 };
 
+export const isAnalyzerVersionCurrent = (version, currentVersion = config.analyzerVersion) =>
+  typeof version === 'number' && Number.isInteger(version) && version >= currentVersion;
+
 export const getGraphData = async (req, res) => {
   const { repoId } = req.params;
 
@@ -219,7 +222,7 @@ export const getGraphData = async (req, res) => {
     };
 
     // 1. Check if graph data already exists AND has current analyzerVersion
-    const isCurrent = repo.analyzerVersion && repo.analyzerVersion >= config.analyzerVersion;
+    const isCurrent = isAnalyzerVersionCurrent(repo.analyzerVersion);
     const hasData = repo.graphData && Array.isArray(repo.graphData.nodes) && repo.metrics && Object.keys(repo.metrics).length > 0;
 
     if (isCurrent && hasData) {

@@ -9,6 +9,7 @@ import {
   detectFrameworks,
   detectEntryCandidates,
   computeRepoMetrics,
+  computeImpactScore,
   normalizeRepoPath,
   METRIC_DEFINITIONS,
 } from './metricsService.js';
@@ -331,5 +332,19 @@ describe('Metrics Service: METRIC_DEFINITIONS export', () => {
     assert.ok(METRIC_DEFINITIONS['orphans']);
     assert.ok(METRIC_DEFINITIONS['entryCandidates']);
     assert.ok(METRIC_DEFINITIONS['frameworks']);
+  });
+});
+
+describe('Metrics Service: computeImpactScore', () => {
+  test('computes impact score as min(100, fanIn*7 + fanOut*3)', () => {
+    assert.strictEqual(computeImpactScore(0, 0), 0);
+    assert.strictEqual(computeImpactScore(1, 0), 7);
+    assert.strictEqual(computeImpactScore(0, 1), 3);
+    assert.strictEqual(computeImpactScore(10, 0), 70);
+    assert.strictEqual(computeImpactScore(0, 10), 30);
+    assert.strictEqual(computeImpactScore(10, 10), 100);
+    assert.strictEqual(computeImpactScore(20, 20), 100, 'must cap at 100');
+    assert.strictEqual(computeImpactScore(null, undefined), 0, 'handles missing arguments');
+    assert.strictEqual(computeImpactScore(-5, -2), 0, 'handles negative values');
   });
 });

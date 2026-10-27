@@ -1,17 +1,27 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import TopBar from './TopBar';
 import Sidebar from './Sidebar';
 import GraphCanvas from './GraphCanvas';
 import DetailsPanel from './DetailsPanel';
 import PanelSeparator from './PanelSeparator';
 import StateMessage from '../ui/StateMessage';
+import Button from '../ui/Button';
 import { useRepoGraph } from './useRepoGraph';
+import { GRAPH_LAYOUTS } from '../../models/layoutPacking';
+import {
+  createDefaultScope,
+  filterGraphByScope,
+  formatScopeBanner,
+  SCOPE_CATEGORIES,
+} from '../../models/scopeModel';
+import { computeNeighborhood, FOCUS_DIRECTIONS } from '../../models/focusModel';
 
 const STORAGE_KEYS = {
   SIDEBAR_WIDTH: 'repolens:sidebar_width',
   DETAILS_WIDTH: 'repolens:details_width',
   SIDEBAR_OPEN: 'repolens:sidebar_open',
   DETAILS_OPEN: 'repolens:details_open',
+  LAYOUT_MODE: 'repolens:layout_mode',
 };
 
 function readStorage(key, fallback) {
@@ -31,8 +41,26 @@ function writeStorage(key, val) {
   }
 }
 
+function readSessionStorage(key, fallback) {
+  try {
+    const val = sessionStorage.getItem(key);
+    return val !== null ? JSON.parse(val) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeSessionStorage(key, val) {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(val));
+  } catch {
+    // Storage quota or disabled in private browsing
+  }
+}
+
 /**
- * Three-panel workspace shell
+ * Three-panel workspace shell with dynamic scope filtering, Focus mode,
+ * multi-layout selection, and accessible shortcuts.
  */
 export default function Workspace({ repoId, onNavigateHome }) {
   const { loading, error, graphData, model, reload } = useRepoGraph(repoId);
@@ -42,6 +70,11 @@ export default function Workspace({ repoId, onNavigateHome }) {
   const [detailsWidth, setDetailsWidth] = useState(() => readStorage(STORAGE_KEYS.DETAILS_WIDTH, 340));
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => readStorage(STORAGE_KEYS.SIDEBAR_OPEN, true));
   const [isDetailsOpen, setIsDetailsOpen] = useState(() => readStorage(STORAGE_KEYS.DETAILS_OPEN, false));
+
+  // Layout engine state (persisted per session)
+  const [layoutMode, setLayoutMode] = useState(() =>
+    readSessionStorage(STORAGE_KEYS.LAYOUT_MODE, GRAPH_LAYOUTS.FORCE)
+  );
 
   // Mobile / small viewport drawer state (<1024px)
   const [isMobile, setIsMobile] = useState(false);
@@ -53,6 +86,40 @@ export default function Workspace({ repoId, onNavigateHome }) {
   const [aiSearchResults, setAiSearchResults] = useState(null);
   const [activeCycle, setActiveCycle] = useState(null);
   const [isSimulatingBlast, setIsSimulatingBlast] = useState(false);
+
+  // Scope filter state (strictly in memory per repo, no localStorage)
+  const [userScope, setUserScope] = useState(null);
+  const [userDismissedSafeguard, setUserDismissedSafeguard] = useState(false);
+
+  const isDenseGraph = Boolean(model?.nodes && model.nodes.length > 400);
+  const isDenseSafeguardActive = isDenseGraph && !userDismissedSafeguard;
+
+  const viewScope = useMemo(() => {
+    if (userScope) return userScope;
+    if (!model?.nodes || model.nodes.length === 0) return null;
+    const initial = createDefaultScope(model.nodes);
+    if (isDenseSafeguardActive) {
+      initial.categories = new Set([SCOPE_CATEGORIES.SOURCE]);
+      initial.showIsolated = false;
+    }
+    return initial;
+  }, [userScope, model, isDenseSafeguardActive]);
+
+  // Compute visible subgraph purely
+  const visibleSubgraph = useMemo(() => {
+    if (!model?.nodes) return null;
+    return filterGraphByScope(model.nodes, model.rawEdges, viewScope);
+  }, [model, viewScope]);
+
+  // Focus mode configuration
+  const [focusConfig, setFocusConfig] = useState({
+    active: false,
+    rootNodeId: null,
+    depth: 1,
+    direction: FOCUS_DIRECTIONS.BOTH,
+    respectScope: true,
+    neighborhood: null,
+  });
 
   // Monitor viewport width
   useEffect(() => {
@@ -68,10 +135,11 @@ export default function Workspace({ repoId, onNavigateHome }) {
     return () => window.removeEventListener('resize', checkViewport);
   }, [mobileDrawer]);
 
-  // Persist layout preferences
+  // Layout resize handlers
   const handleSidebarResize = useCallback((w) => {
     setSidebarWidth(w);
     writeStorage(STORAGE_KEYS.SIDEBAR_WIDTH, w);
+    console.log('SIDEBAR_RESIZED:', w);
   }, []);
 
   const handleDetailsResize = useCallback((w) => {
@@ -103,138 +171,235 @@ export default function Workspace({ repoId, onNavigateHome }) {
     }
   }, [isMobile]);
 
-  // Handle escape key to close mobile drawers
+  // Layout mode switcher
+  const handleChangeLayout = useCallback((mode) => {
+    setLayoutMode(mode);
+    writeSessionStorage(STORAGE_KEYS.LAYOUT_MODE, mode);
+  }, []);
+
+  // Scope handlers
+  const handleToggleCategory = useCallback((category) => {
+    setUserScope((prev) => {
+      const base = prev || viewScope;
+      if (!base) return null;
+      const nextCategories = new Set(base.categories);
+      if (nextCategories.has(category)) {
+        nextCategories.delete(category);
+      } else {
+        nextCategories.add(category);
+      }
+      return { ...base, categories: nextCategories };
+    });
+  }, [viewScope]);
+
+  const handleToggleExtension = useCallback((ext) => {
+    setUserScope((prev) => {
+      const base = prev || viewScope;
+      if (!base) return null;
+      const nextExtensions = new Set(base.extensions);
+      if (nextExtensions.has(ext)) {
+        nextExtensions.delete(ext);
+      } else {
+        nextExtensions.add(ext);
+      }
+      return { ...base, extensions: nextExtensions };
+    });
+  }, [viewScope]);
+
+  const handleSetMinFanIn = useCallback((minFanIn) => {
+    setUserScope((prev) => {
+      const base = prev || viewScope;
+      return base ? { ...base, minFanIn } : null;
+    });
+  }, [viewScope]);
+
+  const handleToggleIsolated = useCallback((showIsolated) => {
+    setUserScope((prev) => {
+      const base = prev || viewScope;
+      return base ? { ...base, showIsolated } : null;
+    });
+  }, [viewScope]);
+
+  const handleFocusFolder = useCallback((folderPath) => {
+    setUserScope((prev) => {
+      const base = prev || viewScope;
+      return base ? { ...base, folderInclude: folderPath } : null;
+    });
+  }, [viewScope]);
+
+  const handleHideFolder = useCallback((folderPath) => {
+    setUserScope((prev) => {
+      const base = prev || viewScope;
+      if (!base) return null;
+      const nextExcludes = new Set(base.folderExclude);
+      nextExcludes.add(folderPath);
+      return { ...base, folderExclude: nextExcludes };
+    });
+  }, [viewScope]);
+
+  const handleClearFolderExcludes = useCallback(() => {
+    setUserScope((prev) => {
+      const base = prev || viewScope;
+      return base ? { ...base, folderExclude: new Set() } : null;
+    });
+  }, [viewScope]);
+
+  const handleResetScope = useCallback(() => {
+    setUserScope(null);
+    setUserDismissedSafeguard(false);
+  }, []);
+
+  const handleShowAll = useCallback(() => {
+    setUserDismissedSafeguard(true);
+    setUserScope({
+      categories: new Set(Object.values(SCOPE_CATEGORIES)),
+      folderInclude: null,
+      folderExclude: new Set(),
+      extensions: new Set(),
+      minFanIn: 0,
+      showIsolated: true,
+    });
+  }, []);
+
+  // Focus mode actions
+  const handleSetFocus = useCallback(
+    ({ rootNodeId, depth, direction, respectScope }) => {
+      if (!rootNodeId || !model) return;
+      const neighborhood = computeNeighborhood(rootNodeId, model, {
+        depth,
+        direction,
+        respectScope,
+        allowedNodeIds: visibleSubgraph?.visibleNodeIds,
+      });
+
+      setFocusConfig({
+        active: true,
+        rootNodeId,
+        depth,
+        direction,
+        respectScope,
+        neighborhood,
+      });
+    },
+    [model, visibleSubgraph?.visibleNodeIds]
+  );
+
+  const handleClearFocus = useCallback(() => {
+    setFocusConfig({
+      active: false,
+      rootNodeId: null,
+      depth: 1,
+      direction: FOCUS_DIRECTIONS.BOTH,
+      respectScope: true,
+      neighborhood: null,
+    });
+  }, []);
+
+  // Synchronized node selection
+  const handleSelectNode = useCallback(
+    (node) => {
+      setSelectedNode(node);
+      if (node && !isDetailsOpen && !isMobile) {
+        setIsDetailsOpen(true);
+      }
+      if (node && isMobile) {
+        setMobileDrawer('details');
+      }
+    },
+    [isDetailsOpen, isMobile]
+  );
+
+  // Global Accessible Keyboard Shortcuts: /, Esc, f, +, -
   useEffect(() => {
     const handleKeyDown = (e) => {
+      const activeTag = document.activeElement?.tagName?.toLowerCase();
+      const isInput =
+        activeTag === 'input' ||
+        activeTag === 'textarea' ||
+        activeTag === 'select' ||
+        document.activeElement?.isContentEditable;
+
+      if (isInput) {
+        if (e.key === 'Escape') {
+          document.activeElement.blur();
+        }
+        return;
+      }
+
       if (e.key === 'Escape') {
         if (mobileDrawer) {
           setMobileDrawer(null);
+        } else if (focusConfig.active) {
+          handleClearFocus();
         } else if (selectedNode) {
           setSelectedNode(null);
+        } else if (searchQuery) {
+          setSearchQuery('');
         }
+      } else if (e.key === '/') {
+        e.preventDefault();
+        const searchInput = document.querySelector('input[placeholder*="Filter files"]');
+        if (searchInput) searchInput.focus();
+      } else if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        if (window.cy) window.cy.fit(undefined, 40);
+      } else if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        if (window.cy) window.cy.zoom(window.cy.zoom() * 1.25);
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault();
+        if (window.cy) window.cy.zoom(window.cy.zoom() * 0.8);
       }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [mobileDrawer, selectedNode]);
+  }, [mobileDrawer, focusConfig.active, selectedNode, searchQuery, handleClearFocus]);
 
-  // When node is selected, open details panel if closed
-  const handleSelectNode = useCallback((node) => {
-    setSelectedNode(node);
-    setIsSimulatingBlast(false);
-    if (node) {
-      if (isMobile) {
-        setMobileDrawer('details');
-      } else {
-        setIsDetailsOpen(true);
-      }
-    }
-  }, [isMobile]);
-
+  // Loading Screen
   if (loading) {
     return (
-      <div className="h-screen w-screen flex flex-col bg-surface-app">
-        <header className="h-12 border-b border-border-subtle bg-surface-panel px-4 flex items-center justify-between">
-          <div className="font-bold text-sm tracking-tight text-content-primary">
-            RepoLens <span className="text-accent text-xs">AI</span>
-          </div>
-        </header>
-        <div className="flex-1 flex items-center justify-center p-6">
-          <StateMessage
-            type="loading"
-            title="Building Dependency Graph"
-            message="Analyzing import structure and computing architecture metrics..."
-            hint="Large repositories with hundreds of source files can take a few moments."
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="h-screen w-screen flex flex-col bg-surface-app">
-        <header className="h-12 border-b border-border-subtle bg-surface-panel px-4 flex items-center justify-between">
-          <div className="font-bold text-sm tracking-tight text-content-primary">
-            RepoLens <span className="text-accent text-xs">AI</span>
-          </div>
-          <button
-            type="button"
-            onClick={onNavigateHome}
-            className="text-xs text-content-secondary hover:text-content-primary"
-          >
-            ← Return to Home
-          </button>
-        </header>
-        <div className="flex-1 flex items-center justify-center p-6">
-          <StateMessage
-            type="error"
-            title={error.title || 'Failed to Load Repository'}
-            message={error.message || 'An unexpected error occurred.'}
-            hint={error.hint}
-            actionLabel="Try Again"
-            onAction={reload}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  const nodes = model?.nodes || [];
-  const edges = model?.rawEdges || [];
-  const circular = model?.rawCircular || [];
-  const analysis = model?.analysis || {};
-  const repo = model?.repo || graphData?.repo || null;
-
-  // Empty graph check: repository has 0 supported JS/TS files
-  if (nodes.length === 0) {
-    // Clean formatting of unsupported extensions
-    const unsupportedList = Array.isArray(analysis.unsupported) ? analysis.unsupported : [];
-    const languageBreakdown = unsupportedList
-      .filter((u) => u.ext && u.ext.trim() !== '')
-      .map((u) => `${u.ext} (${u.count})`)
-      .slice(0, 6)
-      .join(', ');
-
-    return (
-      <div className="h-screen w-screen flex flex-col bg-surface-app">
-        <TopBar
-          repo={repo}
-          circularCount={0}
-          nodeCount={0}
-          edgeCount={0}
-          isSidebarOpen={false}
-          isDetailsOpen={false}
-          onToggleSidebar={() => {}}
-          onToggleDetails={() => {}}
-          onNavigateHome={onNavigateHome}
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-surface-app p-4">
+        <StateMessage
+          type="loading"
+          title="Loading Repository"
+          message="Fetching dependency graph and module metrics..."
         />
-        <div className="flex-1 flex items-center justify-center p-6">
-          <StateMessage
-            type="unavailable"
-            title="No JavaScript or TypeScript Source Files Found"
-            message="This repository does not contain supported JavaScript or TypeScript source files with dependency connections."
-            hint={
-              languageBreakdown
-                ? `Detected other file types: ${languageBreakdown}. RepoLens AI currently visualizes JS and TS module imports.`
-                : 'Only public repositories with JavaScript and TypeScript source files are currently supported.'
-            }
-            actionLabel="Analyze Another Repository"
-            onAction={onNavigateHome}
-          />
-        </div>
+      </div>
+    );
+  }
+
+  // Error Screen
+  if (error || !graphData) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-surface-app p-4">
+        <StateMessage
+          type="error"
+          title="Unable to Load Graph"
+          message={error?.message || 'Could not retrieve repository dependency data.'}
+          action={
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={reload}>
+                Retry
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onNavigateHome}>
+                Back to Home
+              </Button>
+            </div>
+          }
+        />
       </div>
     );
   }
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-surface-app overflow-hidden">
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-surface-app text-content-primary">
       {/* Top Bar */}
       <TopBar
-        repo={repo}
-        circularCount={circular.length}
-        nodeCount={nodes.length}
-        edgeCount={edges.length}
+        repoUrl={graphData?.url || 'Repository'}
+        nodeCount={visibleSubgraph?.visibleNodes?.length ?? (graphData?.nodes?.length || 0)}
+        edgeCount={visibleSubgraph?.visibleEdges?.length ?? (graphData?.edges?.length || 0)}
+        circularCount={graphData?.circular?.length || 0}
         isSidebarOpen={isMobile ? mobileDrawer === 'sidebar' : isSidebarOpen}
         isDetailsOpen={isMobile ? mobileDrawer === 'details' : isDetailsOpen}
         onToggleSidebar={toggleSidebar}
@@ -242,12 +407,49 @@ export default function Workspace({ repoId, onNavigateHome }) {
         onNavigateHome={onNavigateHome}
       />
 
+      {/* Scope Banner (Part 1 & Part 5) */}
+      {visibleSubgraph && (
+        <div className="bg-surface-raised/95 border-b border-border-subtle px-4 py-1.5 flex items-center justify-between text-xs backdrop-blur-xs select-none">
+          <div className="flex items-center gap-2 min-w-0">
+            {isDenseSafeguardActive && (
+              <span className="text-[10px] font-mono uppercase bg-amber-500/10 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded">
+                Dense Graph Safeguard
+              </span>
+            )}
+            <span className="text-content-secondary truncate">
+              {formatScopeBanner(
+                model?.nodes?.length || 0,
+                visibleSubgraph.visibleNodes.length,
+                visibleSubgraph.hiddenCounts
+              )}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {visibleSubgraph.visibleNodes.length < (model?.nodes?.length || 0) && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleShowAll}
+                className="text-[11px] h-6 px-2 text-accent hover:text-accent font-medium hover:bg-accent/10"
+              >
+                Show all
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main Workspace Body */}
       <div className="flex-1 flex min-h-0 relative">
         {/* Desktop Left Sidebar */}
         {!isMobile && isSidebarOpen && (
           <>
-            <div style={{ width: `${sidebarWidth}px` }} className="shrink-0 h-full flex flex-col">
+            <div
+              data-testid="sidebar-wrapper"
+              style={{ width: `${sidebarWidth}px` }}
+              className="shrink-0 h-full flex flex-col"
+            >
               <Sidebar
                 model={model}
                 selectedNode={selectedNode}
@@ -257,6 +459,16 @@ export default function Workspace({ repoId, onNavigateHome }) {
                 onHighlightCycle={setActiveCycle}
                 activeCycle={activeCycle}
                 onAiSearchResults={setAiSearchResults}
+                viewScope={viewScope}
+                visibleSubgraph={visibleSubgraph}
+                onToggleCategory={handleToggleCategory}
+                onToggleExtension={handleToggleExtension}
+                onSetMinFanIn={handleSetMinFanIn}
+                onToggleIsolated={handleToggleIsolated}
+                onFocusFolder={handleFocusFolder}
+                onHideFolder={handleHideFolder}
+                onClearFolderExcludes={handleClearFolderExcludes}
+                onResetScope={handleResetScope}
                 className="h-full"
               />
             </div>
@@ -280,6 +492,11 @@ export default function Workspace({ repoId, onNavigateHome }) {
           aiSearchResults={aiSearchResults}
           activeCycle={activeCycle}
           isSimulatingBlast={isSimulatingBlast}
+          visibleSubgraph={visibleSubgraph}
+          focusConfig={focusConfig}
+          onClearFocus={handleClearFocus}
+          layoutMode={layoutMode}
+          onChangeLayout={handleChangeLayout}
         />
 
         {/* Desktop Right Details Panel */}
@@ -302,6 +519,9 @@ export default function Workspace({ repoId, onNavigateHome }) {
                 onClose={() => setIsDetailsOpen(false)}
                 isSimulatingBlast={isSimulatingBlast}
                 onToggleBlastRadius={() => setIsSimulatingBlast((prev) => !prev)}
+                focusConfig={focusConfig}
+                onSetFocus={handleSetFocus}
+                onClearFocus={handleClearFocus}
                 className="h-full"
               />
             </div>
@@ -317,40 +537,36 @@ export default function Workspace({ repoId, onNavigateHome }) {
           />
         )}
 
-        {/* Mobile Overlay Drawer: Sidebar */}
+        {/* Mobile Left Drawer (Sidebar) */}
         {isMobile && mobileDrawer === 'sidebar' && (
-          <div
-            className="fixed inset-y-0 left-0 w-[300px] max-w-[85vw] bg-surface-panel z-50 shadow-2xl flex flex-col"
-            role="dialog"
-            aria-label="Files and Architecture Health"
-          >
+          <div className="fixed inset-y-0 left-0 z-50 w-80 max-w-[85vw] bg-surface-panel shadow-2xl flex flex-col">
             <Sidebar
               model={model}
               selectedNode={selectedNode}
-              onSelectNode={(node) => {
-                handleSelectNode(node);
-                setMobileDrawer(null);
-              }}
+              onSelectNode={handleSelectNode}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
-              onHighlightCycle={(cycle) => {
-                setActiveCycle(cycle);
-                setMobileDrawer(null);
-              }}
+              onHighlightCycle={setActiveCycle}
               activeCycle={activeCycle}
               onAiSearchResults={setAiSearchResults}
+              viewScope={viewScope}
+              visibleSubgraph={visibleSubgraph}
+              onToggleCategory={handleToggleCategory}
+              onToggleExtension={handleToggleExtension}
+              onSetMinFanIn={handleSetMinFanIn}
+              onToggleIsolated={handleToggleIsolated}
+              onFocusFolder={handleFocusFolder}
+              onHideFolder={handleHideFolder}
+              onClearFolderExcludes={handleClearFolderExcludes}
+              onResetScope={handleResetScope}
               className="h-full"
             />
           </div>
         )}
 
-        {/* Mobile Overlay Drawer: Details */}
-        {isMobile && mobileDrawer === 'details' && (
-          <div
-            className="fixed inset-y-0 right-0 w-[340px] max-w-[85vw] bg-surface-panel z-50 shadow-2xl flex flex-col"
-            role="dialog"
-            aria-label="Module Details"
-          >
+        {/* Mobile Right Drawer (Details Panel) */}
+        {isMobile && mobileDrawer === 'details' && selectedNode && (
+          <div className="fixed inset-y-0 right-0 z-50 w-88 max-w-[85vw] bg-surface-panel shadow-2xl flex flex-col">
             <DetailsPanel
               repoId={repoId}
               selectedNode={selectedNode}
@@ -359,6 +575,9 @@ export default function Workspace({ repoId, onNavigateHome }) {
               onClose={() => setMobileDrawer(null)}
               isSimulatingBlast={isSimulatingBlast}
               onToggleBlastRadius={() => setIsSimulatingBlast((prev) => !prev)}
+              focusConfig={focusConfig}
+              onSetFocus={handleSetFocus}
+              onClearFocus={handleClearFocus}
               className="h-full"
             />
           </div>

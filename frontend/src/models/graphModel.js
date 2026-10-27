@@ -82,6 +82,45 @@ export function classifyNodeKind(node, fanIn = 0, fanOut = 0, cycleCount = 0) {
 }
 
 /**
+ * Computes impact score based on formula min(100, direct_dependents*7 + direct_dependencies*3).
+ *
+ * @param {number} fanIn - Direct dependent count (incoming)
+ * @param {number} fanOut - Direct dependency count (outgoing)
+ * @returns {number} Integer between 0 and 100
+ */
+export function computeImpactScore(fanIn = 0, fanOut = 0) {
+  const fi = Math.max(0, Number(fanIn) || 0);
+  const fo = Math.max(0, Number(fanOut) || 0);
+  return Math.min(100, Math.round(fi * 7 + fo * 3));
+}
+
+/**
+ * Computes all transitive dependents (modules that directly or indirectly import nodeId).
+ *
+ * @param {string} nodeId - Target node
+ * @param {Map<string, string[]>} dependentsMap - Map of target -> array of sources (incoming)
+ * @returns {Set<string>} Set of transitive dependent node IDs
+ */
+export function computeTransitiveDependents(nodeId, dependentsMap) {
+  if (!nodeId || !dependentsMap) return new Set();
+  const visited = new Set();
+  const queue = [...(dependentsMap.get(nodeId) || [])];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!visited.has(current) && current !== nodeId) {
+      visited.add(current);
+      const upstream = dependentsMap.get(current) || [];
+      for (const u of upstream) {
+        if (!visited.has(u) && u !== nodeId) {
+          queue.push(u);
+        }
+      }
+    }
+  }
+  return visited;
+}
+
+/**
  * Builds fast indexes from graph API payload.
  *
  * @param {Object} graphData - { nodes, edges, circular, metrics, analysis }
@@ -142,6 +181,7 @@ export function buildGraphModel(graphData = {}) {
     const fanIn = incoming.length;
     const fanOut = outgoing.length;
     const kind = classifyNodeKind(node, fanIn, fanOut, cycles.length);
+    const impactScore = computeImpactScore(fanIn, fanOut);
 
     const enhancedNode = {
       ...node,
@@ -149,6 +189,7 @@ export function buildGraphModel(graphData = {}) {
       fanOut,
       dependenciesCount: fanOut,
       dependentsCount: fanIn,
+      impactScore,
       cycleCount: cycles.length,
       cycles,
       nodeKind: kind,

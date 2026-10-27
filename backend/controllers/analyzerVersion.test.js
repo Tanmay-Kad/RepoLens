@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import path from 'path';
 import fsPromises from 'fs/promises';
 import mongoose from 'mongoose';
-import { getGraphData, inFlightGraphs } from './analyzeController.js';
+import { getGraphData, inFlightGraphs, isAnalyzerVersionCurrent } from './analyzeController.js';
 import Repository from '../models/Repository.js';
 import config from '../utils/config.js';
 
@@ -125,5 +125,25 @@ describe('Analyzer Versioning & Stale Record Migration', () => {
       inFlightGraphs.delete(fakeRepoId);
       await fsPromises.rm(testCloneDir, { recursive: true, force: true }).catch(() => {});
     }
+  });
+
+  test('isAnalyzerVersionCurrent strictly rejects non-numeric or stale versions and accepts current or higher integers', () => {
+    // Non-numeric or missing values must be rejected
+    assert.strictEqual(isAnalyzerVersionCurrent(undefined), false, 'undefined must be false');
+    assert.strictEqual(isAnalyzerVersionCurrent(null), false, 'null must be false');
+    assert.strictEqual(isAnalyzerVersionCurrent('2.0.0'), false, '"2.0.0" string must be false');
+    assert.strictEqual(isAnalyzerVersionCurrent('1'), false, 'string "1" must be false');
+    assert.strictEqual(isAnalyzerVersionCurrent({}), false, 'object must be false');
+    assert.strictEqual(isAnalyzerVersionCurrent(NaN), false, 'NaN must be false');
+    assert.strictEqual(isAnalyzerVersionCurrent(1.5), false, 'float 1.5 must be false');
+
+    // Stale version (0) must be rejected
+    assert.strictEqual(isAnalyzerVersionCurrent(0), false, '0 must be false when current is >= 1');
+
+    // Current version must be accepted
+    assert.strictEqual(isAnalyzerVersionCurrent(config.analyzerVersion), true, 'current version must be true');
+
+    // Higher version must be accepted
+    assert.strictEqual(isAnalyzerVersionCurrent(config.analyzerVersion + 1), true, 'higher version must be true');
   });
 });

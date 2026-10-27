@@ -12,18 +12,19 @@
 
     /* Borders */
     --border-subtle: #1e293b;
-    --border-default: #334155;
-    --border-strong: #475569;
+    --border-default: #475569;
+    --border-strong: #64748b;
 
     /* Text */
     --text-primary: #f8fafc;
     --text-secondary: #cbd5e1;
     --text-muted: #94a3b8;
 
-    /* Accent (Developer Indigo) */
-    --accent: #6366f1;
-    --accent-hover: #4f46e5;
-    --accent-muted: rgba(99, 102, 241, 0.15);
+    /* Accent (Developer Indigo - WCAG AA compliant) */
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --accent-muted: rgba(79, 70, 229, 0.15);
+    --focus-ring: #818cf8;
 
     /* Status colors */
     --danger: #ef4444;
@@ -73,6 +74,6 @@
 
 /* Focus visible styling */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
