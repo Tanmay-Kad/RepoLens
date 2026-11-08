@@ -12,7 +12,6 @@ describe('Security Audit Endpoint Hardening', () => {
     let execFileCalled = false;
     let forkCalled = false;
 
-    // Spy on child_process methods
     const originalSpawn = childProcess.spawn;
     const originalExec = childProcess.exec;
     const originalExecFile = childProcess.execFile;
@@ -23,7 +22,6 @@ describe('Security Audit Endpoint Hardening', () => {
     childProcess.execFile = () => { execFileCalled = true; throw new Error('Unsafe execFile called'); };
     childProcess.fork = () => { forkCalled = true; throw new Error('Unsafe fork called'); };
 
-    // Mock Repository.findById
     const originalFindById = Repository.findById;
     const fakeRepoId = new mongoose.Types.ObjectId().toString();
     Repository.findById = async (id) => {
@@ -63,7 +61,6 @@ describe('Security Audit Endpoint Hardening', () => {
       assert.strictEqual(execFileCalled, false, 'child_process.execFile must NOT be called');
       assert.strictEqual(forkCalled, false, 'child_process.fork must NOT be called');
     } finally {
-      // Restore mocks
       childProcess.spawn = originalSpawn;
       childProcess.exec = originalExec;
       childProcess.execFile = originalExecFile;
